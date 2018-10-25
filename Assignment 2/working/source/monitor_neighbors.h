@@ -66,6 +66,9 @@ void listenForNeighbors()
 		
 		inet_ntop(AF_INET, &theirAddr.sin_addr, fromAddr, 100);
 		
+
+		fwrite(recvBuf, 4, sizeof(char), stdout);
+		fflush(stdout);
 		short int heardFrom = -1;
 		if(strstr(fromAddr, "10.1.1."))
 		{
@@ -82,6 +85,8 @@ void listenForNeighbors()
 		//send format: 'send'<4 ASCII bytes>, destID<net order 2 byte signed>, <some ASCII message>
 		if(!strncmp(recvBuf, "send", 4))
 		{
+			printf("SENDED");
+			fflush(stdout);
 			//TODO send the requested message to the requested destination node
 			// ...
 		}

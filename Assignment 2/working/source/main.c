@@ -19,7 +19,9 @@ int globalSocketUDP;
 //pre-filled for sending to 10.1.1.0 - 255, port 7777
 struct sockaddr_in globalNodeAddrs[256];
 
- 
+int distances[256];
+
+
 int main(int argc, char** argv)
 {
 	if(argc != 4)
@@ -28,10 +30,11 @@ int main(int argc, char** argv)
 		exit(1);
 	}
 	
-	
+	FILE *initFile;
 	//initialization: get this process's node ID, record what time it is, 
 	//and set up our sockaddr_in's for sending to the other nodes.
 	globalMyID = atoi(argv[1]);
+	printf("NodeID: %d \n", globalMyID);
 	int i;
 	for(i=0;i<256;i++)
 	{
@@ -43,11 +46,25 @@ int main(int argc, char** argv)
 		globalNodeAddrs[i].sin_family = AF_INET;
 		globalNodeAddrs[i].sin_port = htons(7777);
 		inet_pton(AF_INET, tempaddr, &globalNodeAddrs[i].sin_addr);
+		distances[i] = 1;
 	}
 	
-	
 	//TODO: read and parse initial costs file. default to cost 1 if no entry for a node. file may be empty.
-	
+	printf("Opening %s\n", argv[2]);
+	initFile = fopen(argv[3], "r");
+	if(initFile == NULL) 
+	{
+		perror("Cannot open costs file");
+		exit(1);
+	}
+
+	int target, distance;
+
+	while(!feof (initFile))
+	{
+		fscanf(initFile, "%d %d", &target, &distance);
+		distances[target] = distance;
+	}
 	
 	//socket() and bind() our socket. We will do all sendto()ing and recvfrom()ing on this one.
 	if((globalSocketUDP=socket(AF_INET, SOCK_DGRAM, 0)) < 0)
