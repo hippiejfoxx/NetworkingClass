@@ -21,6 +21,16 @@ extern int globalSocketUDP;
 //pre-filled for sending to 10.1.1.0 - 255, port 7777
 extern struct sockaddr_in globalNodeAddrs[256];
 
+int endianConversion(int in)
+{
+	printf("IN %d\n", in);
+	char * val = (char *)&in;
+
+	int firstVal = val[0];
+	int secondVal = val[1];
+
+	return firstVal | secondVal;
+}
 
 //Yes, this is terrible. It's also terrible that, in Linux, a socket
 //can't receive broadcast packets unless it's bound to INADDR_ANY,
@@ -67,8 +77,8 @@ void listenForNeighbors()
 		inet_ntop(AF_INET, &theirAddr.sin_addr, fromAddr, 100);
 		
 
-		fwrite(recvBuf, 4, sizeof(char), stdout);
-		fflush(stdout);
+		// fwrite(recvBuf, 4, sizeof(char), stdout);
+		// fflush(stdout);
 		short int heardFrom = -1;
 		if(strstr(fromAddr, "10.1.1."))
 		{
@@ -85,7 +95,11 @@ void listenForNeighbors()
 		//send format: 'send'<4 ASCII bytes>, destID<net order 2 byte signed>, <some ASCII message>
 		if(!strncmp(recvBuf, "send", 4))
 		{
-			printf("SENDED");
+			int recip =0 ;
+			memcpy(&recip, recvBuf + 4, 2);
+			recip = endianConversion(recip);
+			printf("SEND TO %d\n", recip);
+
 			fflush(stdout);
 			//TODO send the requested message to the requested destination node
 			// ...
@@ -105,4 +119,3 @@ void listenForNeighbors()
 	//(should never reach here)
 	close(globalSocketUDP);
 }
-
