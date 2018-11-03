@@ -221,10 +221,16 @@ void handleInfoMessage(unsigned char * recvBuf)
 	memcpy(&nodeID, recvBuf + 4 , sizeof(int));
 	memcpy(&cost, recvBuf + 4 + sizeof(int) , sizeof(int));
 	memcpy(&numHops, recvBuf + 4 + sizeof(int) + sizeof(int), sizeof(int));
-	int * hops = (int *)malloc(sizeof(int) * numHops);
+	int * hops = (int *)recvBuf + 4 + (sizeof(int) * 3);
 
-	if(nodeID != globalMyID)
+	if(nodeID != globalMyID || cost == 0)
 	{
+		printf("Route info hops: ");
+		for(int i = 0; i < numHops; i++)
+		{
+			printf("%d ", hops[i]);
+		}
+		printf("\n");
 		printf("%s -- New Cost of %d is %d. Hops: %d \n", "INFO", nodeID, cost, numHops);
 		fflush(stdout);
 		//Todo: Add to distance
