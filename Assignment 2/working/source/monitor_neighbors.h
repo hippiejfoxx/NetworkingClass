@@ -10,6 +10,8 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <pthread.h>
+#include "int_vector.h"
+#include "routeInfo_vector.h"
 
 extern int globalMyID;
 //last time you heard from each node. TODO: you will want to monitor this
@@ -21,15 +23,71 @@ extern int globalSocketUDP;
 //pre-filled for sending to 10.1.1.0 - 255, port 7777
 extern struct sockaddr_in globalNodeAddrs[256];
 
-int endianConversion(int in)
+RouteInfo_vector * distances[256];
+
+void openCostFile(char * fileName)
 {
-	printf("IN %d\n", in);
+	printf("Opening: %s\n", fileName);
+	//TODO: read and parse initial costs file. default to cost 1 if no entry for a node. file may be empty.
+	FILE * initFile = fopen(fileName, "r");
+	if(initFile == NULL) 
+	{
+		perror("Cannot open costs file");
+		exit(1);
+	}
+
+	int target, distance;
+
+	while(!feof (initFile))
+	{
+		target = -1;
+		distance = -1;
+		fscanf(initFile, "%d %d", &target, &distance);
+		// printf("Node: %d Costs: %d\n", target, distance);
+		if(target >= 0)
+		{
+			RouteInfo newInfo;
+			newInfo.nodeID = target;
+			newInfo.cost = distance;
+			newInfo.values = *newIntVector();
+
+			distances[target] = newRouteInfoVector();
+
+			RouteInfo_vector * vec = distances[target];
+			addRouteInfoToVector(vec, newInfo);
+			// printRoutingInfo(vec);
+		}
+	}
+}
+
+int IntEndianConversion(int in)
+{
 	char * val = (char *)&in;
+	char * rs = (char *)malloc(sizeof(char)* 2);
 
-	int firstVal = val[0];
-	int secondVal = val[1];
+	for(int i = 0; i < 2; i++)
+	{
+		rs[(2 - 1) - i] = val[i];
+	}
 
-	return firstVal | secondVal;
+	int result =  *(int *)rs;
+	free(rs);
+	return result;
+}
+
+long LongEndianConversion(long in)
+{
+	char * val = (char *)&in;
+	char * rs = (char *)malloc(sizeof(char)* 4);
+
+	for(int i = 0; i < 4; i++)
+	{
+		rs[(4 - 1) - i] = val[i];
+	}
+
+	long result =  *(int *)rs;
+	free(rs);
+	return result;
 }
 
 //Yes, this is terrible. It's also terrible that, in Linux, a socket
@@ -56,6 +114,124 @@ void* announceToNeighbors(void* unusedParam)
 	}
 }
 
+void sendInfoMsg(int target, int newDist, int numHops, int * hops)
+{
+	int size = 4 + (3 * sizeof(int)) + (numHops * sizeof(int));
+	char * msg = (char *)malloc(size);
+	memcpy(msg, "INFO", 4);
+	memcpy(msg+4, &target, sizeof(int));
+	memcpy(msg+4+sizeof(int), &newDist, sizeof(int));
+	memcpy(msg+4+sizeof(int)+sizeof(int), &numHops, sizeof(int));
+
+	for(int i = 0; i < numHops; ++i)
+	{
+		memcpy(msg+4 + (3 * sizeof(int)) + (i * sizeof(int)), &hops[i], sizeof(int));
+	}
+	
+	hackyBroadcast(msg, 4 + (3 * sizeof(int)) + (numHops * sizeof(int)));
+}
+
+void handleNeighborMsg(int nodeID)
+{
+	RouteInfo_vector* vec= distances[nodeID];
+	RouteInfo info;
+	int hop[1];
+	hop[0] = globalMyID;
+
+	if(vec == NULL)
+	{
+		info.nodeID = nodeID;
+		info.cost = 1;
+		info.values = *newIntVector();
+
+		distances[nodeID] = newRouteInfoVector();
+
+		RouteInfo_vector * vec = distances[nodeID];
+		addRouteInfoToVector(vec, info);
+		printf("New neighbor: %d \n", nodeID);
+	}
+
+	sendInfoMsg(nodeID, info.cost, 1, hop);
+}
+
+void updateNeighborInfo(int nodeID, int newCost)
+{
+	RouteInfo_vector * vec= distances[nodeID];
+	RouteInfo info;
+	int hop[1];
+	hop[0] = globalMyID;
+
+	if(vec == NULL)
+	{
+		info.nodeID = nodeID;
+		info.cost = newCost;
+		info.values = *newIntVector();
+
+		distances[nodeID] = newRouteInfoVector();
+
+		RouteInfo_vector * vec = distances[nodeID];
+		addRouteInfoToVector(vec, info);
+		printf("New neighbor: %d \n", nodeID);
+	} else 
+	{
+		RouteInfo * info;
+		int found = findNeighbor(*vec, 0, &info);
+		if(found)
+		{
+			printf("Found NodeID: %d with Cost: %d \n", info->nodeID, info->cost);
+			info->cost = newCost;
+		}
+	}
+
+	sendInfoMsg(nodeID, info.cost, 1, hop);
+}
+
+void handleCostMessage(unsigned char * recvBuf)
+{
+	int target = 0;
+	long newDist = 0;
+
+	memcpy(&target, recvBuf + 4, 2);
+	memcpy(&newDist, recvBuf + 6, 4);
+	target = IntEndianConversion(target);
+	newDist = LongEndianConversion(newDist);
+	// distances[target] = newDist;
+
+	updateNeighborInfo(target, newDist);
+}
+
+void handleSendMessage(unsigned char * recvBuf)
+{
+	char msgBuff[100];
+	int target = 0;
+	memcpy(&target, recvBuf + 4, 2);
+	memcpy(msgBuff, recvBuf + 6, 100);
+
+	target = IntEndianConversion(target);
+	fflush(stdout);
+
+	sendto(globalSocketUDP, msgBuff, 100, 0, (struct sockaddr*)&globalNodeAddrs[target], sizeof(globalNodeAddrs[target]));
+}
+
+void handleInfoMessage(unsigned char * recvBuf)
+{
+	int nodeID;
+	int cost;
+	int numHops;
+	memcpy(&nodeID, recvBuf + 4 , sizeof(int));
+	memcpy(&cost, recvBuf + 4 + sizeof(int) , sizeof(int));
+	memcpy(&numHops, recvBuf + 4 + sizeof(int) + sizeof(int), sizeof(int));
+	int * hops = (int *)malloc(sizeof(int) * numHops);
+
+	if(nodeID != globalMyID)
+	{
+		printf("%s -- New Cost of %d is %d. Hops: %d \n", "INFO", nodeID, cost, numHops);
+		fflush(stdout);
+		//Todo: Add to distance
+		sendInfoMsg(nodeID, cost, numHops + 1, hops);
+	}
+}
+
 void listenForNeighbors()
 {
 	char fromAddr[100];
@@ -66,6 +242,7 @@ void listenForNeighbors()
 	int bytesRecvd;
 	while(1)
 	{
+		memset(recvBuf, 0, 1000);
 		theirAddrLen = sizeof(theirAddr);
 		if ((bytesRecvd = recvfrom(globalSocketUDP, recvBuf, 1000 , 0, 
 					(struct sockaddr*)&theirAddr, &theirAddrLen)) == -1)
@@ -76,9 +253,6 @@ void listenForNeighbors()
 		
 		inet_ntop(AF_INET, &theirAddr.sin_addr, fromAddr, 100);
 		
-
-		// fwrite(recvBuf, 4, sizeof(char), stdout);
-		// fflush(stdout);
 		short int heardFrom = -1;
 		if(strstr(fromAddr, "10.1.1."))
 		{
@@ -86,7 +260,11 @@ void listenForNeighbors()
 					strchr(strchr(strchr(fromAddr,'.')+1,'.')+1,'.')+1);
 			
 			//TODO: this node can consider heardFrom to be directly connected to it; do any such logic now.
-			
+
+			// printf("HEAR :%s\n", recvBuf);
+			// fflush(stdout);
+			handleNeighborMsg(heardFrom);
+
 			//record that we heard from heardFrom just now.
 			gettimeofday(&globalLastHeartbeat[heardFrom], 0);
 		}
@@ -95,26 +273,18 @@ void listenForNeighbors()
 		//send format: 'send'<4 ASCII bytes>, destID<net order 2 byte signed>, <some ASCII message>
 		if(!strncmp(recvBuf, "send", 4))
 		{
-			int recip =0 ;
-			memcpy(&recip, recvBuf + 4, 2);
-			recip = endianConversion(recip);
-			printf("SEND TO %d\n", recip);
-
-			fflush(stdout);
-			//TODO send the requested message to the requested destination node
-			// ...
+			handleSendMessage(recvBuf);
 		}
 		//'cost'<4 ASCII bytes>, destID<net order 2 byte signed> newCost<net order 4 byte signed>
 		else if(!strncmp(recvBuf, "cost", 4))
 		{
-			//TODO record the cost change (remember, the link might currently be down! in that case,
-			//this is the new cost you should treat it as having once it comes back up.)
-			// ...
+			handleCostMessage(recvBuf);
 		}
-		
-		//TODO now check for the various types of packets you use in your own protocol
-		//else if(!strncmp(recvBuf, "your other message types", ))
-		// ... 
+		else if(!strncmp(recvBuf, "INFO", 4))
+		{
+			handleInfoMessage(recvBuf);
+		}
+
 	}
 	//(should never reach here)
 	close(globalSocketUDP);
