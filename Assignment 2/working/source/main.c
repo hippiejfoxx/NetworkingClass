@@ -11,6 +11,8 @@ int globalMyID = 0;
 //in order to realize when a neighbor has gotten cut off from you.
 struct timeval globalLastHeartbeat[256];
 
+int connected[256];
+
 //our all-purpose UDP socket, to be bound to 10.1.1.globalMyID, port 7777
 int globalSocketUDP;
 //pre-filled for sending to 10.1.1.0 - 255, port 7777
@@ -27,7 +29,6 @@ int main(int argc, char** argv)
 	//initialization: get this process's node ID, record what time it is, 
 	//and set up our sockaddr_in's for sending to the other nodes.
 	globalMyID = atoi(argv[1]);
-	printf("NodeID: %d \n", globalMyID);
 	int i;
 	for(i=0;i<256;i++)
 	{
@@ -65,6 +66,12 @@ int main(int argc, char** argv)
 	//start threads... feel free to add your own, and to remove the provided ones.
 	pthread_t announcerThread;
 	pthread_create(&announcerThread, 0, announceToNeighbors, (void*)0);
+
+	pthread_t monitorThread;
+	pthread_create(&monitorThread, 0, monitorConnections, (void*)0);
+
+
+	
 	
 	
 	

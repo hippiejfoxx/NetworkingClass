@@ -12,11 +12,14 @@
 #include <pthread.h>
 #include "int_vector.h"
 #include "routeInfo_vector.h"
+#include "utilities.h"
 
 extern int globalMyID;
 //last time you heard from each node. TODO: you will want to monitor this
 //in order to realize when a neighbor has gotten cut off from you.
 extern struct timeval globalLastHeartbeat[256];
+
+extern int connected[256];
 
 //our all-purpose UDP socket, to be bound to 10.1.1.globalMyID, port 7777
 extern int globalSocketUDP;
@@ -27,7 +30,6 @@ RouteInfo_vector * distances[256];
 
 void openCostFile(char * fileName)
 {
-	printf("Opening: %s\n", fileName);
 	//TODO: read and parse initial costs file. default to cost 1 if no entry for a node. file may be empty.
 	FILE * initFile = fopen(fileName, "r");
 	if(initFile == NULL) 
@@ -43,51 +45,19 @@ void openCostFile(char * fileName)
 		target = -1;
 		distance = -1;
 		fscanf(initFile, "%d %d", &target, &distance);
-		// printf("Node: %d Costs: %d\n", target, distance);
 		if(target >= 0)
 		{
 			RouteInfo newInfo;
 			newInfo.nodeID = target;
 			newInfo.cost = distance;
-			newInfo.values = *newIntVector();
+			newInfo.path = *newIntVector();
 
 			distances[target] = newRouteInfoVector();
 
 			RouteInfo_vector * vec = distances[target];
 			addRouteInfoToVector(vec, newInfo);
-			// printRoutingInfo(vec);
 		}
 	}
-}
-
-int IntEndianConversion(int in)
-{
-	char * val = (char *)&in;
-	char * rs = (char *)malloc(sizeof(char)* 2);
-
-	for(int i = 0; i < 2; i++)
-	{
-		rs[(2 - 1) - i] = val[i];
-	}
-
-	int result =  *(int *)rs;
-	free(rs);
-	return result;
-}
-
-long LongEndianConversion(long in)
-{
-	char * val = (char *)&in;
-	char * rs = (char *)malloc(sizeof(char)* 4);
-
-	for(int i = 0; i < 4; i++)
-	{
-		rs[(4 - 1) - i] = val[i];
-	}
-
-	long result =  *(int *)rs;
-	free(rs);
-	return result;
 }
 
 //Yes, this is terrible. It's also terrible that, in Linux, a socket
@@ -114,44 +84,96 @@ void* announceToNeighbors(void* unusedParam)
 	}
 }
 
-void sendInfoMsg(int target, int newDist, int numHops, int * hops)
+void* monitorConnections(void* unusedParam)
 {
-	int size = 4 + (3 * sizeof(int)) + (numHops * sizeof(int));
-	char * msg = (char *)malloc(size);
-	memcpy(msg, "INFO", 4);
-	memcpy(msg+4, &target, sizeof(int));
-	memcpy(msg+4+sizeof(int), &newDist, sizeof(int));
-	memcpy(msg+4+sizeof(int)+sizeof(int), &numHops, sizeof(int));
+	struct timespec sleepFor;
+	while(1)
+	{
+		fflush(stdout);
+		struct timeval now;
+		gettimeofday(&now, 0);
+		sleepFor.tv_sec = 0;
+		sleepFor.tv_nsec = 300 * 1000 * 1000 * 2; //600 ms
+		for(int i = 0; i < 256; i++)
+		{
+			if(connected[i])
+			{
+				struct timeval res; 
+				timersub(&now, &globalLastHeartbeat[i], &res);
+				if(res.tv_sec > 1)
+				{
+					printf("Disconnected: %d \n", i);
+					connected[i] = 0;
+				}
+			}
+		}
+		nanosleep(&sleepFor, 0);
+	}
+}
 
+void sendInfoMsg(int target, long newDist, int numHops, int * hops)
+{
+	int pad = 0;
+	int size = (4 * sizeof(char)) + (2 * sizeof(int)) + sizeof(long) + (numHops * sizeof(int));
+	char * msg = (char *)malloc(size);
+
+	// printf("Sending -- ");
+	memcpy(msg, "INFO", (4 * sizeof(char)));
+	pad = pad + (4 * sizeof(char));
+	
+	memcpy(msg+pad, &target, sizeof(int));
+	// printf("Target: %d ", *(msg+pad));
+	pad = pad + sizeof(int);
+
+	memcpy(msg+pad, &newDist, sizeof(long));
+	// printf("Dist: %d ", *(msg+pad));
+	pad = pad + sizeof(long);
+
+	memcpy(msg+pad, &numHops, sizeof(int));
+	// printf("Number of Hops: %d ", *(msg+pad));
+	pad = pad + sizeof(int);
+
+	// printf("Snd Nodes: ");
 	for(int i = 0; i < numHops; ++i)
 	{
-		memcpy(msg+4 + (3 * sizeof(int)) + (i * sizeof(int)), &hops[i], sizeof(int));
+		memcpy(msg+pad, &hops[i], sizeof(int));
+		// printf("%d ", *(msg+pad));
+		pad = pad + sizeof(int);
 	}
-	
-	hackyBroadcast(msg, 4 + (3 * sizeof(int)) + (numHops * sizeof(int)));
+	// printf("\n");
+
+	hackyBroadcast(msg, size);
 }
 
 void handleNeighborMsg(int nodeID)
 {
 	RouteInfo_vector* vec= distances[nodeID];
-	RouteInfo info;
+	RouteInfo  * info;
 	int hop[1];
 	hop[0] = globalMyID;
 
-	if(vec == NULL)
+	if(vec == NULL || !findByHops(*vec, 0, &info))
 	{
-		info.nodeID = nodeID;
-		info.cost = 1;
-		info.values = *newIntVector();
+		info = (RouteInfo *)malloc(sizeof(RouteInfo));
+		info->nodeID = nodeID;
+		info->cost = 1;
+		info->path = *newIntVector();
 
 		distances[nodeID] = newRouteInfoVector();
 
 		RouteInfo_vector * vec = distances[nodeID];
-		addRouteInfoToVector(vec, info);
+		addRouteInfoToVector(vec, *info);
 		printf("New neighbor: %d \n", nodeID);
+		// sendInfoMsg(nodeID, info->cost, 1, hop);
 	}
+	
 
-	sendInfoMsg(nodeID, info.cost, 1, hop);
+	if(connected[nodeID] == 0)
+	{
+		sendInfoMsg(nodeID, info->cost, 1, hop);
+		connected[nodeID] = 1;
+	}
+	
 }
 
 void updateNeighborInfo(int nodeID, int newCost)
@@ -165,7 +187,7 @@ void updateNeighborInfo(int nodeID, int newCost)
 	{
 		info.nodeID = nodeID;
 		info.cost = newCost;
-		info.values = *newIntVector();
+		info.path = *newIntVector();
 
 		distances[nodeID] = newRouteInfoVector();
 
@@ -175,10 +197,10 @@ void updateNeighborInfo(int nodeID, int newCost)
 	} else 
 	{
 		RouteInfo * info;
-		int found = findNeighbor(*vec, 0, &info);
+		int found = findByHops(*vec, 0, &info);
 		if(found)
 		{
-			printf("Found NodeID: %d with Cost: %d \n", info->nodeID, info->cost);
+			printf("Found NodeID: %d with Cost: %ld \n", info->nodeID, info->cost);
 			info->cost = newCost;
 		}
 	}
@@ -195,7 +217,6 @@ void handleCostMessage(unsigned char * recvBuf)
 	memcpy(&newDist, recvBuf + 6, 4);
 	target = IntEndianConversion(target);
 	newDist = LongEndianConversion(newDist);
-	// distances[target] = newDist;
 
 	updateNeighborInfo(target, newDist);
 }
@@ -215,26 +236,70 @@ void handleSendMessage(unsigned char * recvBuf)
 
 void handleInfoMessage(unsigned char * recvBuf)
 {
+	int pad = sizeof(char) * 4; 
 	int nodeID;
-	int cost;
+	long cost;
 	int numHops;
-	memcpy(&nodeID, recvBuf + 4 , sizeof(int));
-	memcpy(&cost, recvBuf + 4 + sizeof(int) , sizeof(int));
-	memcpy(&numHops, recvBuf + 4 + sizeof(int) + sizeof(int), sizeof(int));
-	int * hops = (int *)recvBuf + 4 + (sizeof(int) * 3);
 
-	if(nodeID != globalMyID || cost == 0)
+	memcpy(&nodeID, recvBuf + pad, sizeof(int));
+	pad = pad + sizeof(int);
+
+	memcpy(&cost, recvBuf + 4 + sizeof(int) , sizeof(long));
+	pad = pad + (sizeof(long));
+
+	memcpy(&numHops, recvBuf + 4 + sizeof(int) + sizeof(long), sizeof(int));
+	pad = pad + sizeof(int);
+
+	RouteInfo * info = (RouteInfo *)malloc(sizeof(RouteInfo));
+	info->nodeID = nodeID;
+	info->cost = cost;
+	int_vector * vec = newIntVector();
+
+	printf("\nNodeID: %d\nCost:%ld\nNumber of Hops: %d\n", nodeID, cost, numHops);
+
+	printf("Recv Nodes: ");
+	for(int i = 0; i < numHops; i++)
 	{
-		printf("Route info hops: ");
-		for(int i = 0; i < numHops; i++)
+		addValueToIntVector(vec, *(recvBuf+pad));
+
+		printf("%d ", *(recvBuf+pad));
+		
+		
+
+		pad = pad + sizeof(int);
+	}
+	printf("\n");
+	fflush(stdout)		;
+
+	info->path = *vec;
+
+	if(nodeID != globalMyID && !contains(*vec, globalMyID))
+	{
+		RouteInfo_vector * existingRoutes = distances[nodeID];
+
+		if(existingRoutes == NULL)
 		{
-			printf("%d ", hops[i]);
+			distances[nodeID] = newRouteInfoVector();
 		}
-		printf("\n");
-		printf("%s -- New Cost of %d is %d. Hops: %d \n", "INFO", nodeID, cost, numHops);
+
+		RouteInfo * oldRoute;
+		if(!findMatchingRoute(*distances[nodeID], *info, &oldRoute))
+		{
+			printf("Recieved New Route");
+			addRouteInfoToVector(distances[nodeID], *info);
+			addValueToIntVector(vec, globalMyID);
+			sendInfoMsg(nodeID, cost, numHops + 1, vec->values);
+		} 
+		else
+		{
+			printf("Found existing route");
+		}
+
+		printf("-------------------------\n");
 		fflush(stdout);
-		//Todo: Add to distance
-		sendInfoMsg(nodeID, cost, numHops + 1, hops);
+	} else 
+	{
+		printf("NO FORWARDING\n");
 	}
 }
 
@@ -273,21 +338,34 @@ void listenForNeighbors()
 
 			//record that we heard from heardFrom just now.
 			gettimeofday(&globalLastHeartbeat[heardFrom], 0);
+			connected[heardFrom] = 1;
 		}
 		
 		//Is it a packet from the manager? (see mp2 specification for more details)
 		//send format: 'send'<4 ASCII bytes>, destID<net order 2 byte signed>, <some ASCII message>
 		if(!strncmp(recvBuf, "send", 4))
 		{
+			printf("----------------------------\n");
+			heardFrom = atoi(
+					strchr(strchr(strchr(fromAddr,'.')+1,'.')+1,'.')+1);
+			printf("send msg from %d\n", heardFrom);
 			handleSendMessage(recvBuf);
 		}
 		//'cost'<4 ASCII bytes>, destID<net order 2 byte signed> newCost<net order 4 byte signed>
 		else if(!strncmp(recvBuf, "cost", 4))
 		{
+			printf("----------------------------\n");
+			heardFrom = atoi(
+					strchr(strchr(strchr(fromAddr,'.')+1,'.')+1,'.')+1);
+			printf("Cost msg from %d\n", heardFrom);
 			handleCostMessage(recvBuf);
 		}
 		else if(!strncmp(recvBuf, "INFO", 4))
 		{
+			printf("----------------------------\n");
+			heardFrom = atoi(
+					strchr(strchr(strchr(fromAddr,'.')+1,'.')+1,'.')+1);
+			printf("Info msg from %d\n", heardFrom);
 			handleInfoMessage(recvBuf);
 		}
 

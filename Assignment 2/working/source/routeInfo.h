@@ -1,5 +1,5 @@
 typedef struct{
 	int nodeID;
-	int cost;
-	int_vector values;
+	long cost;
+	int_vector path;
 } RouteInfo;
