@@ -269,7 +269,7 @@ void handleInfoMessage(unsigned char * recvBuf)
 		pad = pad + sizeof(int);
 	}
 	printf("\n");
-	fflush(stdout)		;
+	fflush(stdout);
 
 	info->path = *vec;
 
@@ -282,24 +282,36 @@ void handleInfoMessage(unsigned char * recvBuf)
 			distances[nodeID] = newRouteInfoVector();
 		}
 
-		RouteInfo * oldRoute;
-		if(!findMatchingRoute(*distances[nodeID], *info, &oldRoute))
-		{
-			printf("Recieved New Route");
-			addRouteInfoToVector(distances[nodeID], *info);
-			addValueToIntVector(vec, globalMyID);
-			sendInfoMsg(nodeID, cost, numHops + 1, vec->values);
-		} 
-		else
-		{
-			printf("Found existing route");
-		}
+		int sender = info->path.values[info->path.numValues - 1];
 
-		printf("-------------------------\n");
+		RouteInfo * oldRoute;
+		RouteInfo * neighborInfo;
+
+		if(findByHops(*(distances[sender]), 0, &neighborInfo))
+		{
+			info->cost = info->cost + neighborInfo->cost;
+			if(!findMatchingRoute(*distances[nodeID], *info, &oldRoute))
+			{
+				printf("Recieved New Route\n");
+				addRouteInfoToVector(distances[nodeID], *info);
+				addValueToIntVector(vec, globalMyID);
+			} 
+			else
+			{
+				printf("Found existing route\n");
+				if(oldRoute->cost != info->cost)
+				{
+					oldRoute->cost = info->cost;
+					printf("Updated cost\n");
+				}
+				
+			}
+			sendInfoMsg(nodeID, info->cost, numHops + 1, vec->values);
+		}
 		fflush(stdout);
 	} else 
 	{
-		printf("NO FORWARDING\n");
+		printf("NO FORWARDING - Node is target or part of existing route\n");
 	}
 }
 
