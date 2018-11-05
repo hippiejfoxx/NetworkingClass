@@ -60,6 +60,35 @@ int findMatchingRoute(RouteInfo_vector existingRoutes, RouteInfo check, RouteInf
 	return 0;
 }
 
+int findLowestActiveCost(RouteInfo_vector existingRoutes)
+{
+	int distance = -1;
+
+	for(int i = 0; i < existingRoutes.numValues; i++)
+	{
+		RouteInfo cur = existingRoutes.routes[i];
+		if(cur.isActive && (distance == -1 || (distance >= 0 && distance > cur.cost)))
+		{
+			distance = cur.cost;
+		}
+	}
+	return distance;
+}
+
+int findActiveRoutesWithCost(RouteInfo_vector existingRoutes, int cost, RouteInfo_vector * results)
+{
+	for(int i = 0; i < existingRoutes.numValues; i++)
+	{
+		RouteInfo cur = existingRoutes.routes[i];
+		if(cur.isActive && cur.cost == cost)
+		{
+			printf("Match\n");
+			addRouteInfoToVector(results, cur);
+		}
+	}
+	return results->numValues;
+}
+
 void printRoutingInfo(RouteInfo_vector * vec)
 {
 	for(int i = 0; i < vec->numValues; i++)

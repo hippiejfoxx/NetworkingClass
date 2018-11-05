@@ -187,6 +187,7 @@ void handleNeighborMsg(int nodeID)
 		info = (RouteInfo *)malloc(sizeof(RouteInfo));
 		info->nodeID = nodeID;
 		info->cost = 1;
+		info->isActive = 1;
 		info->path = *newIntVector();
 
 		distances[nodeID] = newRouteInfoVector();
@@ -276,11 +277,32 @@ void handleSendMessage(unsigned char * recvBuf)
 		printf("%s", msgBuff);
 	} else 
 	{
-
+		if(distances[target] != NULL)
+		{
+			int lowestCost = findLowestActiveCost(*distances[target]);
+			printf("Lowest cost: %d\n", lowestCost);
+			RouteInfo_vector routeVec;
+			int found = findActiveRoutesWithCost(*distances[target], lowestCost, &routeVec);
+			if(found > 0)
+			{
+				printf("Found %d routes\n", found);
+				if(found = 1)
+				{
+					if(routeVec.routes[0].path.numValues < 1 && connected[target])
+					{
+						sendto(globalSocketUDP, recvBuf, 100, 0, (struct sockaddr*)&globalNodeAddrs[target], sizeof(globalNodeAddrs[target]));
+					} else
+					{
+						int nextHop = routeVec.routes[0].path.values[routeVec.routes[0].path.numValues - 1];
+						sendto(globalSocketUDP, recvBuf, 100, 0, (struct sockaddr*)&globalNodeAddrs[nextHop], sizeof(globalNodeAddrs[nextHop]));
+					}
+				}
+			}
+		}
 	}
 	
 	fflush(stdout);
-	sendto(globalSocketUDP, recvBuf, 100, 0, (struct sockaddr*)&globalNodeAddrs[target], sizeof(globalNodeAddrs[target]));
+	
 }
 
 void handleWithdrawMessage(char * recvBuf)
@@ -345,6 +367,7 @@ void handleInfoMessage(unsigned char * recvBuf)
 	RouteInfo * info = (RouteInfo *)malloc(sizeof(RouteInfo));
 	info->nodeID = nodeID;
 	info->cost = cost;
+	info->isActive = 1;
 	int_vector * vec = newIntVector();
 
 	for(int i = 0; i < numHops; i++)

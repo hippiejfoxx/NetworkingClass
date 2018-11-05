@@ -20,7 +20,6 @@ int_vector * newIntVector()
 
 void * addValueToIntVector(int_vector * vec, int val)
 {
-	// printf("ADDDING %d\n", val);
 	if(vec->numValues >= vec->size)
 	{
 		int * newArr = (int *)malloc(sizeof(int) * (vec->size * 2));
