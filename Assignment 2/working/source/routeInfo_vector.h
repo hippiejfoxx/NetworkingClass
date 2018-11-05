@@ -60,8 +60,6 @@ int findMatchingRoute(RouteInfo_vector existingRoutes, RouteInfo check, RouteInf
 	return 0;
 }
 
-
-
 void printRoutingInfo(RouteInfo_vector * vec)
 {
 	for(int i = 0; i < vec->numValues; i++)

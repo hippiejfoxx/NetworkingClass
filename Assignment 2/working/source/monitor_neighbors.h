@@ -90,30 +90,23 @@ void sendInfoMsg(int target, long newDist, int numHops, int * hops)
 	int size = (4 * sizeof(char)) + (2 * sizeof(int)) + sizeof(long) + (numHops * sizeof(int));
 	char * msg = (char *)malloc(size);
 
-	// printf("Sending -- ");
 	memcpy(msg, "INFO", (4 * sizeof(char)));
 	pad = pad + (4 * sizeof(char));
 	
 	memcpy(msg+pad, &target, sizeof(int));
-	// printf("Target: %d ", *(msg+pad));
 	pad = pad + sizeof(int);
 
 	memcpy(msg+pad, &newDist, sizeof(long));
-	// printf("Dist: %d ", *(msg+pad));
 	pad = pad + sizeof(long);
 
 	memcpy(msg+pad, &numHops, sizeof(int));
-	// printf("Number of Hops: %d ", *(msg+pad));
 	pad = pad + sizeof(int);
 
-	// printf("Snd Nodes: ");
 	for(int i = 0; i < numHops; ++i)
 	{
 		memcpy(msg+pad, &hops[i], sizeof(int));
-		// printf("%d ", *(msg+pad));
 		pad = pad + sizeof(int);
 	}
-	// printf("\n");
 
 	hackyBroadcast(msg, size);
 }
@@ -124,30 +117,23 @@ void sendWithdrawMsg(int target, long newDist, int numHops, int * hops)
 	int size = (4 * sizeof(char)) + (2 * sizeof(int)) + sizeof(long) + (numHops * sizeof(int));
 	char * msg = (char *)malloc(size);
 
-	// printf("Sending -- ");
 	memcpy(msg, "WITH", (4 * sizeof(char)));
 	pad = pad + (4 * sizeof(char));
 	
 	memcpy(msg+pad, &target, sizeof(int));
-	// printf("Target: %d ", *(msg+pad));
 	pad = pad + sizeof(int);
 
 	memcpy(msg+pad, &newDist, sizeof(long));
-	// printf("Dist: %d ", *(msg+pad));
 	pad = pad + sizeof(long);
 
 	memcpy(msg+pad, &numHops, sizeof(int));
-	// printf("Number of Hops: %d ", *(msg+pad));
 	pad = pad + sizeof(int);
 
-	// printf("Snd Nodes: ");
 	for(int i = 0; i < numHops; ++i)
 	{
 		memcpy(msg+pad, &hops[i], sizeof(int));
-		// printf("%d ", *(msg+pad));
 		pad = pad + sizeof(int);
 	}
-	// printf("\n");
 
 	hackyBroadcast(msg, size);
 }
@@ -180,7 +166,6 @@ void* monitorConnections(void* unusedParam)
 
 					if(vec != NULL && findByHops(*vec, 0, &info))
 					{
-						printf("Sending withdraw for %d\n", i);
 						sendWithdrawMsg(info->nodeID, info->cost, 1, nodes);
 					}
 				}
@@ -209,7 +194,6 @@ void handleNeighborMsg(int nodeID)
 		RouteInfo_vector * vec = distances[nodeID];
 		addRouteInfoToVector(vec, *info);
 	}
-	
 
 	if(connected[nodeID] == 0)
 	{
@@ -280,15 +264,66 @@ void handleCostMessage(unsigned char * recvBuf)
 
 void handleSendMessage(unsigned char * recvBuf)
 {
+	printf("SEND -- ");
 	char msgBuff[100];
 	int target = 0;
 	memcpy(&target, recvBuf + 4, 2);
 	memcpy(msgBuff, recvBuf + 6, 100);
-
 	target = IntEndianConversion(target);
-	fflush(stdout);
 
-	sendto(globalSocketUDP, msgBuff, 100, 0, (struct sockaddr*)&globalNodeAddrs[target], sizeof(globalNodeAddrs[target]));
+	if(target == globalMyID)
+	{
+		printf("%s", msgBuff);
+	} else 
+	{
+
+	}
+	
+	fflush(stdout);
+	sendto(globalSocketUDP, recvBuf, 100, 0, (struct sockaddr*)&globalNodeAddrs[target], sizeof(globalNodeAddrs[target]));
+}
+
+void handleWithdrawMessage(char * recvBuf)
+{
+	int pad = sizeof(char) * 4; 
+	int nodeID;
+	long cost;
+	int numHops;
+
+	memcpy(&nodeID, recvBuf + pad, sizeof(int));
+	pad = pad + sizeof(int);
+
+	memcpy(&cost, recvBuf + 4 + sizeof(int) , sizeof(long));
+	pad = pad + (sizeof(long));
+
+	memcpy(&numHops, recvBuf + 4 + sizeof(int) + sizeof(long), sizeof(int));
+	pad = pad + sizeof(int);
+
+	RouteInfo * info = (RouteInfo *)malloc(sizeof(RouteInfo));
+	info->nodeID = nodeID;
+	info->cost = cost;
+	int_vector * vec = newIntVector();
+
+	for(int i = 0; i < numHops; i++)
+	{
+		addValueToIntVector(vec, *(recvBuf+pad));
+		pad = pad + sizeof(int);
+	}
+
+	info->path = *vec;
+
+	if(nodeID != globalMyID && !contains(*vec, globalMyID))
+	{
+		RouteInfo * found;
+		if(findMatchingRoute(*distances[nodeID], *info, &found))
+		{
+			printf("withdraw processed\n");
+			found->isActive = 0;
+		}
+		addValueToIntVector(vec, globalMyID);
+		sendWithdrawMsg(nodeID, cost, numHops + 1, vec->values);
+		fflush(stdout);
+	}
 }
 
 void handleInfoMessage(unsigned char * recvBuf)
@@ -312,21 +347,11 @@ void handleInfoMessage(unsigned char * recvBuf)
 	info->cost = cost;
 	int_vector * vec = newIntVector();
 
-	// printf("\nNodeID: %d\nCost:%ld\nNumber of Hops: %d\n", nodeID, cost, numHops);
-
-	// printf("Recv Nodes: ");
 	for(int i = 0; i < numHops; i++)
 	{
 		addValueToIntVector(vec, *(recvBuf+pad));
-
-		// printf("%d ", *(recvBuf+pad));
-		
-		
-
 		pad = pad + sizeof(int);
 	}
-	// printf("\n");
-	fflush(stdout);
 
 	info->path = *vec;
 
@@ -355,21 +380,15 @@ void handleInfoMessage(unsigned char * recvBuf)
 			} 
 			else
 			{
-				// printf("Found existing route\n");
-				// printf("\nNodeID: %d\nCost:%ld\nNumber of Hops: %d\n", info->nodeID, info->cost, info->path.numValues);
 				if(oldRoute->cost != info->cost)
 				{
 					oldRoute->cost = info->cost;
 				}
-				
 			}
 			addValueToIntVector(vec, globalMyID);
 			sendInfoMsg(nodeID, info->cost, numHops + 1, vec->values);
 		}
 		fflush(stdout);
-	} else 
-	{
-		// printf("NO FORWARDING - Node is target or part of existing route\n");
 	}
 }
 
@@ -401,9 +420,6 @@ void listenForNeighbors()
 					strchr(strchr(strchr(fromAddr,'.')+1,'.')+1,'.')+1);
 			
 			//TODO: this node can consider heardFrom to be directly connected to it; do any such logic now.
-
-			// printf("HEAR :%s\n", recvBuf);
-			// fflush(stdout);
 			handleNeighborMsg(heardFrom);
 
 			//record that we heard from heardFrom just now.
@@ -415,37 +431,27 @@ void listenForNeighbors()
 		//send format: 'send'<4 ASCII bytes>, destID<net order 2 byte signed>, <some ASCII message>
 		if(!strncmp(recvBuf, "send", 4))
 		{
-			// printf("----------------------------\n");
 			heardFrom = atoi(
 					strchr(strchr(strchr(fromAddr,'.')+1,'.')+1,'.')+1);
-			// printf("send msg from %d\n", heardFrom);
 			handleSendMessage(recvBuf);
 		}
 		//'cost'<4 ASCII bytes>, destID<net order 2 byte signed> newCost<net order 4 byte signed>
 		else if(!strncmp(recvBuf, "cost", 4))
 		{
-			// printf("----------------------------\n");
 			heardFrom = atoi(
 					strchr(strchr(strchr(fromAddr,'.')+1,'.')+1,'.')+1);
-			// printf("Cost msg from %d\n", heardFrom);
 			handleCostMessage(recvBuf);
 		}
 		else if(!strncmp(recvBuf, "INFO", 4))
 		{
-			// printf("----------------------------\n");
 			heardFrom = atoi(
 					strchr(strchr(strchr(fromAddr,'.')+1,'.')+1,'.')+1);
-			// printf("Info msg from %d\n", heardFrom);
 			handleInfoMessage(recvBuf);
 		}
 		else if(!strncmp(recvBuf, "WITH", 4))
 		{
-			// // printf("----------------------------\n");
-			// heardFrom = atoi(
-			// 		strchr(strchr(strchr(fromAddr,'.')+1,'.')+1,'.')+1);
-			// // printf("Info msg from %d\n", heardFrom);
-			// handleInfoMessage(recvBuf);
 			printf("Received withdraw \n");
+			handleWithdrawMessage(recvBuf);
 		}
 
 	}
