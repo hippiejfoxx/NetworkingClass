@@ -171,6 +171,23 @@ void handleNeighborMsg(int nodeID)
 	if(connected[nodeID] == 0)
 	{
 		sendInfoMsg(nodeID, info->cost, 1, hop);
+		for(int i = 0; i < 256; i++)
+		{
+			RouteInfo_vector * routes = distances[i];
+			if(routes != NULL)
+			{
+				for(int j = 0; j < routes->numValues; j++)
+				{
+					RouteInfo info = routes->routes[j];
+					int_vector nodes = info.path;
+					addValueToIntVector(&nodes, globalMyID);
+
+					printf("Nodes re-sent: ");
+					printVecVals(&nodes);
+					sendInfoMsg(info.nodeID, info.cost, nodes.numValues, nodes.values);
+				}
+			}
+		}
 		connected[nodeID] = 1;
 	}
 	
@@ -255,20 +272,20 @@ void handleInfoMessage(unsigned char * recvBuf)
 	info->cost = cost;
 	int_vector * vec = newIntVector();
 
-	printf("\nNodeID: %d\nCost:%ld\nNumber of Hops: %d\n", nodeID, cost, numHops);
+	// printf("\nNodeID: %d\nCost:%ld\nNumber of Hops: %d\n", nodeID, cost, numHops);
 
-	printf("Recv Nodes: ");
+	// printf("Recv Nodes: ");
 	for(int i = 0; i < numHops; i++)
 	{
 		addValueToIntVector(vec, *(recvBuf+pad));
 
-		printf("%d ", *(recvBuf+pad));
+		// printf("%d ", *(recvBuf+pad));
 		
 		
 
 		pad = pad + sizeof(int);
 	}
-	printf("\n");
+	// printf("\n");
 	fflush(stdout);
 
 	info->path = *vec;
@@ -290,28 +307,29 @@ void handleInfoMessage(unsigned char * recvBuf)
 		if(findByHops(*(distances[sender]), 0, &neighborInfo))
 		{
 			info->cost = info->cost + neighborInfo->cost;
-			if(!findMatchingRoute(*distances[nodeID], *info, &oldRoute))
+			int found = findMatchingRoute(*distances[nodeID], *info, &oldRoute);
+			if(!found)
 			{
-				printf("Recieved New Route\n");
+				printf("Recieved New Route to Node %d \n", info->nodeID);
 				addRouteInfoToVector(distances[nodeID], *info);
-				addValueToIntVector(vec, globalMyID);
 			} 
 			else
 			{
-				printf("Found existing route\n");
+				// printf("Found existing route\n");
+				// printf("\nNodeID: %d\nCost:%ld\nNumber of Hops: %d\n", info->nodeID, info->cost, info->path.numValues);
 				if(oldRoute->cost != info->cost)
 				{
 					oldRoute->cost = info->cost;
-					printf("Updated cost\n");
 				}
 				
 			}
+			addValueToIntVector(vec, globalMyID);
 			sendInfoMsg(nodeID, info->cost, numHops + 1, vec->values);
 		}
 		fflush(stdout);
 	} else 
 	{
-		printf("NO FORWARDING - Node is target or part of existing route\n");
+		// printf("NO FORWARDING - Node is target or part of existing route\n");
 	}
 }
 

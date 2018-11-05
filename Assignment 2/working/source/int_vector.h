@@ -66,11 +66,11 @@ int contains(int_vector vec, int value)
 	return 0;
 }
 
-// void * printVals(int_vector * vec)
-// {
-// 	for(int i = 0; i < vec->numValues; i++)
-// 	{
-// 		printf("%d\n", vec->values[i]);
-// 	}
-// }
+void * printVecVals(int_vector * vec)
+{
+	for(int i = 0; i < vec->numValues; i++)
+	{
+		printf("%d\n", vec->values[i]);
+	}
+}
 
