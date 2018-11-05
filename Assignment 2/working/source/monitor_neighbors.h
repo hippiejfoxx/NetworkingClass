@@ -84,33 +84,6 @@ void* announceToNeighbors(void* unusedParam)
 	}
 }
 
-void* monitorConnections(void* unusedParam)
-{
-	struct timespec sleepFor;
-	while(1)
-	{
-		fflush(stdout);
-		struct timeval now;
-		gettimeofday(&now, 0);
-		sleepFor.tv_sec = 0;
-		sleepFor.tv_nsec = 300 * 1000 * 1000 * 2; //600 ms
-		for(int i = 0; i < 256; i++)
-		{
-			if(connected[i])
-			{
-				struct timeval res; 
-				timersub(&now, &globalLastHeartbeat[i], &res);
-				if(res.tv_sec > 1)
-				{
-					printf("Disconnected: %d \n", i);
-					connected[i] = 0;
-				}
-			}
-		}
-		nanosleep(&sleepFor, 0);
-	}
-}
-
 void sendInfoMsg(int target, long newDist, int numHops, int * hops)
 {
 	int pad = 0;
@@ -145,6 +118,78 @@ void sendInfoMsg(int target, long newDist, int numHops, int * hops)
 	hackyBroadcast(msg, size);
 }
 
+void sendWithdrawMsg(int target, long newDist, int numHops, int * hops)
+{
+	int pad = 0;
+	int size = (4 * sizeof(char)) + (2 * sizeof(int)) + sizeof(long) + (numHops * sizeof(int));
+	char * msg = (char *)malloc(size);
+
+	// printf("Sending -- ");
+	memcpy(msg, "WITH", (4 * sizeof(char)));
+	pad = pad + (4 * sizeof(char));
+	
+	memcpy(msg+pad, &target, sizeof(int));
+	// printf("Target: %d ", *(msg+pad));
+	pad = pad + sizeof(int);
+
+	memcpy(msg+pad, &newDist, sizeof(long));
+	// printf("Dist: %d ", *(msg+pad));
+	pad = pad + sizeof(long);
+
+	memcpy(msg+pad, &numHops, sizeof(int));
+	// printf("Number of Hops: %d ", *(msg+pad));
+	pad = pad + sizeof(int);
+
+	// printf("Snd Nodes: ");
+	for(int i = 0; i < numHops; ++i)
+	{
+		memcpy(msg+pad, &hops[i], sizeof(int));
+		// printf("%d ", *(msg+pad));
+		pad = pad + sizeof(int);
+	}
+	// printf("\n");
+
+	hackyBroadcast(msg, size);
+}
+
+void* monitorConnections(void* unusedParam)
+{
+	struct timespec sleepFor;
+	while(1)
+	{
+		fflush(stdout);
+		struct timeval now;
+		gettimeofday(&now, 0);
+		sleepFor.tv_sec = 0;
+		sleepFor.tv_nsec = 300 * 1000 * 1000 * 2; //600 ms
+		for(int i = 0; i < 256; i++)
+		{
+			if(connected[i])
+			{
+				struct timeval res; 
+				timersub(&now, &globalLastHeartbeat[i], &res);
+				if(res.tv_sec > 1)
+				{
+					printf("Disconnected: %d \n", i);
+					connected[i] = 0;
+
+					RouteInfo_vector * vec = distances[i];
+					RouteInfo * info;
+					int nodes[1];
+					nodes[0] = globalMyID;
+
+					if(vec != NULL && findByHops(*vec, 0, &info))
+					{
+						printf("Sending withdraw for %d\n", i);
+						sendWithdrawMsg(info->nodeID, info->cost, 1, nodes);
+					}
+				}
+			}
+		}
+		nanosleep(&sleepFor, 0);
+	}
+}
+
 void handleNeighborMsg(int nodeID)
 {
 	RouteInfo_vector* vec= distances[nodeID];
@@ -163,8 +208,6 @@ void handleNeighborMsg(int nodeID)
 
 		RouteInfo_vector * vec = distances[nodeID];
 		addRouteInfoToVector(vec, *info);
-		printf("New neighbor: %d \n", nodeID);
-		// sendInfoMsg(nodeID, info->cost, 1, hop);
 	}
 	
 
@@ -181,9 +224,6 @@ void handleNeighborMsg(int nodeID)
 					RouteInfo info = routes->routes[j];
 					int_vector nodes = info.path;
 					addValueToIntVector(&nodes, globalMyID);
-
-					printf("Nodes re-sent: ");
-					printVecVals(&nodes);
 					sendInfoMsg(info.nodeID, info.cost, nodes.numValues, nodes.values);
 				}
 			}
@@ -375,28 +415,37 @@ void listenForNeighbors()
 		//send format: 'send'<4 ASCII bytes>, destID<net order 2 byte signed>, <some ASCII message>
 		if(!strncmp(recvBuf, "send", 4))
 		{
-			printf("----------------------------\n");
+			// printf("----------------------------\n");
 			heardFrom = atoi(
 					strchr(strchr(strchr(fromAddr,'.')+1,'.')+1,'.')+1);
-			printf("send msg from %d\n", heardFrom);
+			// printf("send msg from %d\n", heardFrom);
 			handleSendMessage(recvBuf);
 		}
 		//'cost'<4 ASCII bytes>, destID<net order 2 byte signed> newCost<net order 4 byte signed>
 		else if(!strncmp(recvBuf, "cost", 4))
 		{
-			printf("----------------------------\n");
+			// printf("----------------------------\n");
 			heardFrom = atoi(
 					strchr(strchr(strchr(fromAddr,'.')+1,'.')+1,'.')+1);
-			printf("Cost msg from %d\n", heardFrom);
+			// printf("Cost msg from %d\n", heardFrom);
 			handleCostMessage(recvBuf);
 		}
 		else if(!strncmp(recvBuf, "INFO", 4))
 		{
-			printf("----------------------------\n");
+			// printf("----------------------------\n");
 			heardFrom = atoi(
 					strchr(strchr(strchr(fromAddr,'.')+1,'.')+1,'.')+1);
-			printf("Info msg from %d\n", heardFrom);
+			// printf("Info msg from %d\n", heardFrom);
 			handleInfoMessage(recvBuf);
+		}
+		else if(!strncmp(recvBuf, "WITH", 4))
+		{
+			// // printf("----------------------------\n");
+			// heardFrom = atoi(
+			// 		strchr(strchr(strchr(fromAddr,'.')+1,'.')+1,'.')+1);
+			// // printf("Info msg from %d\n", heardFrom);
+			// handleInfoMessage(recvBuf);
+			printf("Received withdraw \n");
 		}
 
 	}
