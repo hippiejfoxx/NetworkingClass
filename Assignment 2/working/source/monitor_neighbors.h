@@ -84,6 +84,33 @@ void* announceToNeighbors(void* unusedParam)
 	}
 }
 
+void sendCostUpdateMsg(int target, long newDist, int numHops, int * hops)
+{
+	int pad = 0;
+	int size = (4 * sizeof(char)) + (2 * sizeof(int)) + sizeof(long) + (numHops * sizeof(int));
+	char * msg = (char *)malloc(size);
+
+	memcpy(msg, "CUPD", (4 * sizeof(char)));
+	pad = pad + (4 * sizeof(char));
+
+	memcpy(msg+pad, &target, sizeof(int));
+	pad = pad + sizeof(int);
+
+	memcpy(msg+pad, &newDist, sizeof(long));
+	pad = pad + sizeof(long);
+
+	memcpy(msg+pad, &numHops, sizeof(int));
+	pad = pad + sizeof(int);
+
+	for(int i = 0; i < numHops; ++i)
+	{
+		memcpy(msg+pad, &hops[i], sizeof(int));
+		pad = pad + sizeof(int);
+	}
+
+	hackyBroadcast(msg, size);
+}
+
 void sendInfoMsg(int target, long newDist, int numHops, int * hops)
 {
 	int pad = 0;
@@ -215,18 +242,17 @@ void handleNeighborMsg(int nodeID)
 		}
 		connected[nodeID] = 1;
 	}
-	
 }
 
 void updateNeighborInfo(int nodeID, int newCost)
 {
 	RouteInfo_vector * vec= distances[nodeID];
-	RouteInfo info;
 	int hop[1];
 	hop[0] = globalMyID;
 
 	if(vec == NULL)
 	{
+		RouteInfo info;
 		info.nodeID = nodeID;
 		info.cost = newCost;
 		info.path = *newIntVector();
@@ -235,19 +261,31 @@ void updateNeighborInfo(int nodeID, int newCost)
 
 		RouteInfo_vector * vec = distances[nodeID];
 		addRouteInfoToVector(vec, info);
-		printf("New neighbor: %d \n", nodeID);
 	} else 
 	{
-		RouteInfo * info;
-		int found = findByHops(*vec, 0, &info);
+		RouteInfo * existing;
+		int found = findByHops(*vec, 0, &existing);
 		if(found)
 		{
-			printf("Found NodeID: %d with Cost: %ld \n", info->nodeID, info->cost);
-			info->cost = newCost;
+			existing->cost = newCost;
 		}
 	}
 
-	sendInfoMsg(nodeID, info.cost, 1, hop);
+	int pad = 0;
+	int size = (4 * sizeof(char)) + (2 * sizeof(int)) + sizeof(long);
+	char * msg = (char *)malloc(size);
+	memset(msg, 0, size);
+
+	memcpy(msg, "CUPD", (4 * sizeof(char)));
+	pad = pad + (4 * sizeof(char));
+
+	memcpy(msg+pad, &globalMyID, sizeof(int));
+	pad = pad + sizeof(int);
+
+	memcpy(msg+pad, &newCost, sizeof(long));
+	pad = pad + sizeof(long);
+
+	sendto(globalSocketUDP, msg, size, 0, (struct sockaddr*)&globalNodeAddrs[nodeID], sizeof(globalNodeAddrs[nodeID]));
 }
 
 void handleCostMessage(unsigned char * recvBuf)
@@ -263,9 +301,45 @@ void handleCostMessage(unsigned char * recvBuf)
 	updateNeighborInfo(target, newDist);
 }
 
+
+
+int getNextHop(RouteInfo_vector vec)
+{
+	printf("Avaliable routes: %d\n", vec.numValues);
+	printRoutingInfo(&vec);
+	// int lowestCost = findLowestActiveCost(vec);
+	// printf("Lowest cost: %d\n", lowestCost);
+	// RouteInfo_vector * res = newRouteInfoVector();
+	// int found = findActiveRoutesWithCost(vec, lowestCost, &res);
+	// if(found > 0)
+	// {
+	// 	RouteInfo_vector routeVec = *res;
+	// 	printf("Found %d routes\n", found);
+	// 	if(found == 1)
+	// 	{
+	// 		if(routeVec.routes[0].path.numValues < 1 && connected[routeVec.routes[0].nodeID])
+	// 		{
+	// 			return routeVec.routes[0].nodeID;
+	// 		} else
+	// 		{
+	// 			return routeVec.routes[0].path.values[routeVec.routes[0].path.numValues - 1];
+	// 		}
+	// 	} else
+	// 	{
+	// 		if(routeVec.routes[0].path.values[routeVec.routes[0].path.numValues - 1] < routeVec.routes[1].path.values[routeVec.routes[1].path.numValues - 1])
+	// 		{
+	// 			return routeVec.routes[0].path.values[routeVec.routes[0].path.numValues - 1];
+	// 		} else
+	// 		{
+	// 			return routeVec.routes[1].path.values[routeVec.routes[1].path.numValues - 1];
+	// 		}
+	// 	}
+	// } 
+	return 1;
+}
+
 void handleSendMessage(unsigned char * recvBuf)
 {
-	printf("SEND -- ");
 	char msgBuff[100];
 	int target = 0;
 	memcpy(&target, recvBuf + 4, 2);
@@ -279,25 +353,8 @@ void handleSendMessage(unsigned char * recvBuf)
 	{
 		if(distances[target] != NULL)
 		{
-			int lowestCost = findLowestActiveCost(*distances[target]);
-			printf("Lowest cost: %d\n", lowestCost);
-			RouteInfo_vector routeVec;
-			int found = findActiveRoutesWithCost(*distances[target], lowestCost, &routeVec);
-			if(found > 0)
-			{
-				printf("Found %d routes\n", found);
-				if(found = 1)
-				{
-					if(routeVec.routes[0].path.numValues < 1 && connected[target])
-					{
-						sendto(globalSocketUDP, recvBuf, 100, 0, (struct sockaddr*)&globalNodeAddrs[target], sizeof(globalNodeAddrs[target]));
-					} else
-					{
-						int nextHop = routeVec.routes[0].path.values[routeVec.routes[0].path.numValues - 1];
-						sendto(globalSocketUDP, recvBuf, 100, 0, (struct sockaddr*)&globalNodeAddrs[nextHop], sizeof(globalNodeAddrs[nextHop]));
-					}
-				}
-			}
+			int nextHop = getNextHop(*distances[target]);
+			sendto(globalSocketUDP, recvBuf, 100, 0, (struct sockaddr*)&globalNodeAddrs[nextHop], sizeof(globalNodeAddrs[nextHop]));
 		}
 	}
 	
@@ -344,6 +401,72 @@ void handleWithdrawMessage(char * recvBuf)
 		}
 		addValueToIntVector(vec, globalMyID);
 		sendWithdrawMsg(nodeID, cost, numHops + 1, vec->values);
+		fflush(stdout);
+	}
+}
+
+void handleCostUpdateMessage(unsigned char * recvBuf)
+{
+	int pad = sizeof(char) * 4; 
+	int nodeID;
+	long cost;
+	int numHops;
+
+	memcpy(&nodeID, recvBuf + pad, sizeof(int));
+	pad = pad + sizeof(int);
+
+	memcpy(&cost, recvBuf + 4 + sizeof(int) , sizeof(long));
+	pad = pad + (sizeof(long));
+
+	memcpy(&numHops, recvBuf + 4 + sizeof(int) + sizeof(long), sizeof(int));
+	pad = pad + sizeof(int);
+
+	RouteInfo * info = (RouteInfo *)malloc(sizeof(RouteInfo));
+	info->nodeID = nodeID;
+	info->cost = cost;
+	info->isActive = 1;
+	int_vector * vec = newIntVector();
+
+	for(int i = 0; i < numHops; i++)
+	{
+		addValueToIntVector(vec, *(recvBuf+pad));
+		pad = pad + sizeof(int);
+	}
+
+	info->path = *vec;
+
+	if(nodeID != globalMyID && !contains(*vec, globalMyID)) //Target is not current node and route doesn't contain current node
+	{
+		RouteInfo_vector * existingRoutes = distances[nodeID];
+
+		if(existingRoutes == NULL)
+		{
+			distances[nodeID] = newRouteInfoVector();
+		}
+
+		int sender = info->path.values[info->path.numValues - 1];
+
+		RouteInfo * oldRoute;
+		RouteInfo * neighborInfo;
+
+		if(findByHops(*(distances[sender]), 0, &neighborInfo))
+		{
+			info->cost = info->cost + neighborInfo->cost;
+			int found = findMatchingRoute(*distances[nodeID], *info, &oldRoute);
+			if(!found)
+			{
+				addRouteInfoToVector(distances[nodeID], *info);
+			} 
+			else
+			{
+				if(oldRoute->cost != info->cost)
+				{
+					oldRoute->cost = info->cost;
+				}
+			}
+			addValueToIntVector(vec, globalMyID);
+			sendInfoMsg(nodeID, info->cost, numHops + 1, vec->values);
+		}
 		fflush(stdout);
 	}
 }
@@ -398,7 +521,6 @@ void handleInfoMessage(unsigned char * recvBuf)
 			int found = findMatchingRoute(*distances[nodeID], *info, &oldRoute);
 			if(!found)
 			{
-				printf("Recieved New Route to Node %d \n", info->nodeID);
 				addRouteInfoToVector(distances[nodeID], *info);
 			} 
 			else
@@ -406,6 +528,7 @@ void handleInfoMessage(unsigned char * recvBuf)
 				if(oldRoute->cost != info->cost)
 				{
 					oldRoute->cost = info->cost;
+					oldRoute->isActive = true;
 				}
 			}
 			addValueToIntVector(vec, globalMyID);
@@ -454,27 +577,33 @@ void listenForNeighbors()
 		//send format: 'send'<4 ASCII bytes>, destID<net order 2 byte signed>, <some ASCII message>
 		if(!strncmp(recvBuf, "send", 4))
 		{
-			heardFrom = atoi(
-					strchr(strchr(strchr(fromAddr,'.')+1,'.')+1,'.')+1);
+			// heardFrom = atoi(
+			// 		strchr(strchr(strchr(fromAddr,'.')+1,'.')+1,'.')+1);
 			handleSendMessage(recvBuf);
 		}
 		//'cost'<4 ASCII bytes>, destID<net order 2 byte signed> newCost<net order 4 byte signed>
 		else if(!strncmp(recvBuf, "cost", 4))
 		{
-			heardFrom = atoi(
-					strchr(strchr(strchr(fromAddr,'.')+1,'.')+1,'.')+1);
+		// 	heardFrom = atoi(
+		// 			strchr(strchr(strchr(fromAddr,'.')+1,'.')+1,'.')+1);
 			handleCostMessage(recvBuf);
 		}
 		else if(!strncmp(recvBuf, "INFO", 4))
 		{
-			heardFrom = atoi(
-					strchr(strchr(strchr(fromAddr,'.')+1,'.')+1,'.')+1);
+			// heardFrom = atoi(
+			// 		strchr(strchr(strchr(fromAddr,'.')+1,'.')+1,'.')+1);
 			handleInfoMessage(recvBuf);
 		}
 		else if(!strncmp(recvBuf, "WITH", 4))
 		{
 			printf("Received withdraw \n");
 			handleWithdrawMessage(recvBuf);
+		}
+		else if(!strncmp(recvBuf, "CUPD", 4))
+		{
+			printf("Received cost update \n");
+			fflush(stdout);
+			handleCostUpdateMessage(recvBuf);
 		}
 
 	}
