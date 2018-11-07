@@ -28,37 +28,6 @@ extern struct sockaddr_in globalNodeAddrs[256];
 
 RouteInfo_vector * distances[256];
 
-void openCostFile(char * fileName)
-{
-	//TODO: read and parse initial costs file. default to cost 1 if no entry for a node. file may be empty.
-	FILE * initFile = fopen(fileName, "r");
-	if(initFile == NULL) 
-	{
-		perror("Cannot open costs file");
-		exit(1);
-	}
-
-	int target, distance;
-
-	while(!feof (initFile))
-	{
-		target = -1;
-		distance = -1;
-		fscanf(initFile, "%d %d", &target, &distance);
-		if(target >= 0)
-		{
-			RouteInfo newInfo;
-			newInfo.nodeID = target;
-			newInfo.cost = distance;
-			newInfo.path = *newIntVector();
-
-			distances[target] = newRouteInfoVector();
-
-			RouteInfo_vector * vec = distances[target];
-			addRouteInfoToVector(vec, newInfo);
-		}
-	}
-}
 
 //Yes, this is terrible. It's also terrible that, in Linux, a socket
 //can't receive broadcast packets unless it's bound to INADDR_ANY,
@@ -70,18 +39,6 @@ void hackyBroadcast(const char* buf, int length)
 		if(i != globalMyID) //(although with a real broadcast you would also get the packet yourself)
 			sendto(globalSocketUDP, buf, length, 0,
 				  (struct sockaddr*)&globalNodeAddrs[i], sizeof(globalNodeAddrs[i]));
-}
-
-void* announceToNeighbors(void* unusedParam)
-{
-	struct timespec sleepFor;
-	sleepFor.tv_sec = 0;
-	sleepFor.tv_nsec = 300 * 1000 * 1000; //300 ms
-	while(1)
-	{
-		hackyBroadcast("HEREIAM", 7);
-		nanosleep(&sleepFor, 0);
-	}
 }
 
 void sendCostUpdateMsg(int target, long newDist, int numHops, int * hops)
@@ -165,6 +122,45 @@ void sendWithdrawMsg(int target, long newDist, int numHops, int * hops)
 	hackyBroadcast(msg, size);
 }
 
+void sendUpdateMsg(int nodeID, long cost, int numHops, int * hops)
+{
+	int pad = 0;
+	int size = (4 * sizeof(char)) + (2 * sizeof(int)) + sizeof(long) + (numHops * sizeof(int));
+	char * msg = (char *)malloc(size);
+
+	memcpy(msg, "UPDT", (4 * sizeof(char)));
+	pad = pad + (4 * sizeof(char));
+	
+	memcpy(msg+pad, &nodeID, sizeof(int));
+	pad = pad + sizeof(int);
+
+	memcpy(msg+pad, &cost, sizeof(long));
+	pad = pad + sizeof(long);
+
+	memcpy(msg+pad, &numHops, sizeof(int));
+	pad = pad + sizeof(int);
+
+	for(int i = 0; i < numHops; ++i)
+	{
+		memcpy(msg+pad, &hops[i], sizeof(int));
+		pad = pad + sizeof(int);
+	}
+
+	hackyBroadcast(msg, size);
+}
+
+void* announceToNeighbors(void* unusedParam)
+{
+	struct timespec sleepFor;
+	sleepFor.tv_sec = 0;
+	sleepFor.tv_nsec = 300 * 1000 * 1000; //300 ms
+	while(1)
+	{
+		hackyBroadcast("HEREIAM", 7);
+		nanosleep(&sleepFor, 0);
+	}
+}
+
 void* monitorConnections(void* unusedParam)
 {
 	struct timespec sleepFor;
@@ -201,6 +197,40 @@ void* monitorConnections(void* unusedParam)
 		nanosleep(&sleepFor, 0);
 	}
 }
+
+void openCostFile(char * fileName)
+{
+	//TODO: read and parse initial costs file. default to cost 1 if no entry for a node. file may be empty.
+	FILE * initFile = fopen(fileName, "r");
+	if(initFile == NULL) 
+	{
+		perror("Cannot open costs file");
+		exit(1);
+	}
+
+	int target, distance;
+
+	while(!feof (initFile))
+	{
+		target = -1;
+		distance = -1;
+		fscanf(initFile, "%d %d", &target, &distance);
+		if(target >= 0)
+		{
+			RouteInfo newInfo;
+			newInfo.nodeID = target;
+			newInfo.cost = distance;
+			newInfo.path = *newIntVector();
+
+			distances[target] = newRouteInfoVector();
+
+			RouteInfo_vector * vec = distances[target];
+			addRouteInfoToVector(vec, newInfo);
+		}
+	}
+}
+
+
 
 void handleNeighborMsg(int nodeID)
 {
@@ -244,48 +274,34 @@ void handleNeighborMsg(int nodeID)
 	}
 }
 
-void updateNeighborInfo(int nodeID, int newCost)
+void * sendNeighborCostChange(int target, long cost)
 {
-	RouteInfo_vector * vec= distances[nodeID];
-	int hop[1];
-	hop[0] = globalMyID;
-
-	if(vec == NULL)
-	{
-		RouteInfo info;
-		info.nodeID = nodeID;
-		info.cost = newCost;
-		info.path = *newIntVector();
-
-		distances[nodeID] = newRouteInfoVector();
-
-		RouteInfo_vector * vec = distances[nodeID];
-		addRouteInfoToVector(vec, info);
-	} else 
-	{
-		RouteInfo * existing;
-		int found = findByHops(*vec, 0, &existing);
-		if(found)
-		{
-			existing->cost = newCost;
-		}
-	}
-
 	int pad = 0;
-	int size = (4 * sizeof(char)) + (2 * sizeof(int)) + sizeof(long);
+	int size = (4 * sizeof(char)) + sizeof(int) + sizeof(long);
 	char * msg = (char *)malloc(size);
-	memset(msg, 0, size);
 
-	memcpy(msg, "CUPD", (4 * sizeof(char)));
+	memcpy(msg, "CCHG", (4 * sizeof(char)));
 	pad = pad + (4 * sizeof(char));
-
+	
 	memcpy(msg+pad, &globalMyID, sizeof(int));
 	pad = pad + sizeof(int);
 
-	memcpy(msg+pad, &newCost, sizeof(long));
+	memcpy(msg+pad, &cost, sizeof(long));
 	pad = pad + sizeof(long);
 
-	sendto(globalSocketUDP, msg, size, 0, (struct sockaddr*)&globalNodeAddrs[nodeID], sizeof(globalNodeAddrs[nodeID]));
+	sendto(globalSocketUDP, msg, size, 0, (struct sockaddr*)&globalNodeAddrs[target], sizeof(globalNodeAddrs[target]));
+}
+
+
+void handleSendMessage(unsigned char * recvBuf)
+{
+	char msgBuff[100];
+	int target = 0;
+	memcpy(&target, recvBuf + 4, 2);
+	memcpy(msgBuff, recvBuf + 6, 100);
+	target = IntEndianConversion(target);
+
+	
 }
 
 void handleCostMessage(unsigned char * recvBuf)
@@ -298,68 +314,15 @@ void handleCostMessage(unsigned char * recvBuf)
 	target = IntEndianConversion(target);
 	newDist = LongEndianConversion(newDist);
 
-	updateNeighborInfo(target, newDist);
-}
-
-
-
-int getNextHop(RouteInfo_vector vec)
-{
-	printf("Avaliable routes: %d\n", vec.numValues);
-	printRoutingInfo(&vec);
-	// int lowestCost = findLowestActiveCost(vec);
-	// printf("Lowest cost: %d\n", lowestCost);
-	// RouteInfo_vector * res = newRouteInfoVector();
-	// int found = findActiveRoutesWithCost(vec, lowestCost, &res);
-	// if(found > 0)
-	// {
-	// 	RouteInfo_vector routeVec = *res;
-	// 	printf("Found %d routes\n", found);
-	// 	if(found == 1)
-	// 	{
-	// 		if(routeVec.routes[0].path.numValues < 1 && connected[routeVec.routes[0].nodeID])
-	// 		{
-	// 			return routeVec.routes[0].nodeID;
-	// 		} else
-	// 		{
-	// 			return routeVec.routes[0].path.values[routeVec.routes[0].path.numValues - 1];
-	// 		}
-	// 	} else
-	// 	{
-	// 		if(routeVec.routes[0].path.values[routeVec.routes[0].path.numValues - 1] < routeVec.routes[1].path.values[routeVec.routes[1].path.numValues - 1])
-	// 		{
-	// 			return routeVec.routes[0].path.values[routeVec.routes[0].path.numValues - 1];
-	// 		} else
-	// 		{
-	// 			return routeVec.routes[1].path.values[routeVec.routes[1].path.numValues - 1];
-	// 		}
-	// 	}
-	// } 
-	return 1;
-}
-
-void handleSendMessage(unsigned char * recvBuf)
-{
-	char msgBuff[100];
-	int target = 0;
-	memcpy(&target, recvBuf + 4, 2);
-	memcpy(msgBuff, recvBuf + 6, 100);
-	target = IntEndianConversion(target);
-
-	if(target == globalMyID)
+	RouteInfo * info;
+	if(findByHops(*distances[target], 0, &info))
 	{
-		printf("%s", msgBuff);
-	} else 
-	{
-		if(distances[target] != NULL)
-		{
-			int nextHop = getNextHop(*distances[target]);
-			sendto(globalSocketUDP, recvBuf, 100, 0, (struct sockaddr*)&globalNodeAddrs[nextHop], sizeof(globalNodeAddrs[nextHop]));
-		}
+		info->cost = newDist;
+		sendNeighborCostChange(target, newDist);	
+		int node[1];
+		node[0] = globalMyID;
+		sendUpdateMsg(target, newDist, 1, node);
 	}
-	
-	fflush(stdout);
-	
 }
 
 void handleWithdrawMessage(char * recvBuf)
@@ -401,72 +364,6 @@ void handleWithdrawMessage(char * recvBuf)
 		}
 		addValueToIntVector(vec, globalMyID);
 		sendWithdrawMsg(nodeID, cost, numHops + 1, vec->values);
-		fflush(stdout);
-	}
-}
-
-void handleCostUpdateMessage(unsigned char * recvBuf)
-{
-	int pad = sizeof(char) * 4; 
-	int nodeID;
-	long cost;
-	int numHops;
-
-	memcpy(&nodeID, recvBuf + pad, sizeof(int));
-	pad = pad + sizeof(int);
-
-	memcpy(&cost, recvBuf + 4 + sizeof(int) , sizeof(long));
-	pad = pad + (sizeof(long));
-
-	memcpy(&numHops, recvBuf + 4 + sizeof(int) + sizeof(long), sizeof(int));
-	pad = pad + sizeof(int);
-
-	RouteInfo * info = (RouteInfo *)malloc(sizeof(RouteInfo));
-	info->nodeID = nodeID;
-	info->cost = cost;
-	info->isActive = 1;
-	int_vector * vec = newIntVector();
-
-	for(int i = 0; i < numHops; i++)
-	{
-		addValueToIntVector(vec, *(recvBuf+pad));
-		pad = pad + sizeof(int);
-	}
-
-	info->path = *vec;
-
-	if(nodeID != globalMyID && !contains(*vec, globalMyID)) //Target is not current node and route doesn't contain current node
-	{
-		RouteInfo_vector * existingRoutes = distances[nodeID];
-
-		if(existingRoutes == NULL)
-		{
-			distances[nodeID] = newRouteInfoVector();
-		}
-
-		int sender = info->path.values[info->path.numValues - 1];
-
-		RouteInfo * oldRoute;
-		RouteInfo * neighborInfo;
-
-		if(findByHops(*(distances[sender]), 0, &neighborInfo))
-		{
-			info->cost = info->cost + neighborInfo->cost;
-			int found = findMatchingRoute(*distances[nodeID], *info, &oldRoute);
-			if(!found)
-			{
-				addRouteInfoToVector(distances[nodeID], *info);
-			} 
-			else
-			{
-				if(oldRoute->cost != info->cost)
-				{
-					oldRoute->cost = info->cost;
-				}
-			}
-			addValueToIntVector(vec, globalMyID);
-			sendInfoMsg(nodeID, info->cost, numHops + 1, vec->values);
-		}
 		fflush(stdout);
 	}
 }
@@ -528,13 +425,103 @@ void handleInfoMessage(unsigned char * recvBuf)
 				if(oldRoute->cost != info->cost)
 				{
 					oldRoute->cost = info->cost;
-					oldRoute->isActive = true;
+					oldRoute->isActive = 1;
 				}
 			}
 			addValueToIntVector(vec, globalMyID);
 			sendInfoMsg(nodeID, info->cost, numHops + 1, vec->values);
 		}
 		fflush(stdout);
+	}
+}
+
+
+
+
+void handleUpdateMsg(char * recvBuf)
+{
+	int pad = sizeof(char) * 4; 
+	int nodeID;
+	long cost;
+	int numHops;
+
+	memcpy(&nodeID, recvBuf + pad, sizeof(int));
+	pad = pad + sizeof(int);
+
+	memcpy(&cost, recvBuf + 4 + sizeof(int) , sizeof(long));
+	pad = pad + (sizeof(long));
+
+	memcpy(&numHops, recvBuf + 4 + sizeof(int) + sizeof(long), sizeof(int));
+	pad = pad + sizeof(int);
+
+	RouteInfo * info = (RouteInfo *)malloc(sizeof(RouteInfo));
+	info->nodeID = nodeID;
+	info->cost = cost;
+	int_vector * vec = newIntVector();
+
+	printf("COST: %ld\n", info->cost);
+
+	for(int i = 0; i < numHops; i++)
+	{
+		addValueToIntVector(vec, *(recvBuf+pad));
+		pad = pad + sizeof(int);
+	}
+
+	info->path = *vec;
+
+	if(nodeID != globalMyID && !contains(*vec, globalMyID))
+	{
+		RouteInfo_vector * existingRoutes = distances[nodeID];
+
+		if(existingRoutes == NULL)
+		{
+			distances[nodeID] = newRouteInfoVector();
+		}
+
+		int sender = info->path.values[info->path.numValues - 1];
+
+		RouteInfo * oldRoute;
+		RouteInfo * neighborInfo;
+
+		if(findByHops(*(distances[sender]), 0, &neighborInfo))
+		{
+			info->cost = info->cost + neighborInfo->cost;
+			int found = findMatchingRoute(*distances[nodeID], *info, &oldRoute);
+			if(!found)
+			{
+				addRouteInfoToVector(distances[nodeID], *info);
+			} 
+			else
+			{
+				if(oldRoute->cost != info->cost)
+				{
+					oldRoute->cost = info->cost;
+				}
+			}
+			printf("Update for %d Cost: %ld\n", nodeID, info->cost);
+			addValueToIntVector(vec, globalMyID);
+			sendUpdateMsg(nodeID, info->cost, numHops + 1, vec->values);
+		}
+		fflush(stdout);
+	}
+}
+
+void handleNeighborCostChangeMsg(char * recvBuf)
+{
+	int nodeID;
+	long cost;
+
+	memcpy(&nodeID, recvBuf + (sizeof(char) * 4), sizeof(int));
+	memcpy(&cost, recvBuf + (sizeof(char) * 4) + sizeof(int), sizeof(long));
+
+	RouteInfo * info;
+	if(findByHops(*distances[nodeID], 0, &info))
+	{
+		// printf("Update for %d Old Cost: %ld, Cost: %ld\n", nodeID, info->cost ,cost);
+		info->cost = cost;
+		int node[1];
+		node[0] = globalMyID;
+		sendUpdateMsg(nodeID, cost, 1, node);
 	}
 }
 
@@ -579,13 +566,14 @@ void listenForNeighbors()
 		{
 			// heardFrom = atoi(
 			// 		strchr(strchr(strchr(fromAddr,'.')+1,'.')+1,'.')+1);
-			handleSendMessage(recvBuf);
+			// handleSendMessage(recvBuf);
 		}
 		//'cost'<4 ASCII bytes>, destID<net order 2 byte signed> newCost<net order 4 byte signed>
 		else if(!strncmp(recvBuf, "cost", 4))
 		{
 		// 	heardFrom = atoi(
 		// 			strchr(strchr(strchr(fromAddr,'.')+1,'.')+1,'.')+1);
+			printf("Cost msg received\n");
 			handleCostMessage(recvBuf);
 		}
 		else if(!strncmp(recvBuf, "INFO", 4))
@@ -599,11 +587,17 @@ void listenForNeighbors()
 			printf("Received withdraw \n");
 			handleWithdrawMessage(recvBuf);
 		}
-		else if(!strncmp(recvBuf, "CUPD", 4))
+		else if(!strncmp(recvBuf, "CCHG", 4))
 		{
-			printf("Received cost update \n");
+			printf("Received neighbor cost change \n");
 			fflush(stdout);
-			handleCostUpdateMessage(recvBuf);
+			handleNeighborCostChangeMsg(recvBuf);
+		}
+		else if(!strncmp(recvBuf, "UPDT", 4))
+		{
+			printf("Received update \n");
+			fflush(stdout);
+			handleUpdateMsg(recvBuf);
 		}
 
 	}
