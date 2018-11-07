@@ -499,7 +499,7 @@ void handleUpdateMsg(char * recvBuf)
 
 		if(findByHops(*(distances[sender]), 0, &neighborInfo))
 		{
-			printf("Update for %d %ld + %ld\n", nodeID, info->cost, neighborInfo->cost);
+			// printf("Update for %d %ld + %ld\n", nodeID, info->cost, neighborInfo->cost);
 			info->cost = info->cost + neighborInfo->cost;
 			int found = findMatchingRoute(*distances[nodeID], *info, &oldRoute);
 			if(!found)
@@ -531,11 +531,30 @@ void handleNeighborCostChangeMsg(char * recvBuf)
 	RouteInfo * info;
 	if(findByHops(*distances[nodeID], 0, &info))
 	{
-		// printf("Update for %d Old Cost: %ld, Cost: %ld\n", nodeID, info->cost ,cost);
+		// printf("Update for %d Old Cost: %ld, Cost: %ld\n", nodeID, info->cost ,cost);m
+		long costDiff = cost - info->cost;
 		info->cost = cost;
 		int node[1];
 		node[0] = globalMyID;
 		sendUpdateMsg(nodeID, cost, 1, node);
+		for(int i = 0; i < 256; i++)
+		{
+			RouteInfo * res = (RouteInfo *)malloc(sizeof(RouteInfo) * 100);
+			if(distances[i] != NULL)
+			{
+				int found = findAllRoutesWithNextHop(distances[i], nodeID, &res);
+				for(int j = 0; j < found; j++)
+				{
+					RouteInfo * info = res + j;
+
+					int_vector route = info->path;
+					addValueToIntVector(&route, globalMyID);
+					// printf("Route to %d. Old Cost: %ld CostDiff: %ld New Cost: %ld\n", info->nodeID, info->cost, costDiff, info->cost + costDiff);
+					info->cost = info->cost + costDiff;
+					sendUpdateMsg(info->nodeID, info->cost, info->path.numValues + 1, route.values);
+				}
+			}
+		}
 	}
 }
 
