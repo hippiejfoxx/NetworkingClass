@@ -230,8 +230,6 @@ void openCostFile(char * fileName)
 	}
 }
 
-
-
 void handleNeighborMsg(int nodeID)
 {
 	RouteInfo_vector* vec= distances[nodeID];
@@ -300,8 +298,6 @@ void handleSendMessage(unsigned char * recvBuf)
 	memcpy(&target, recvBuf + 4, 2);
 	memcpy(msgBuff, recvBuf + 6, 100);
 	target = IntEndianConversion(target);
-
-	
 }
 
 void handleCostMessage(unsigned char * recvBuf)
@@ -317,11 +313,31 @@ void handleCostMessage(unsigned char * recvBuf)
 	RouteInfo * info;
 	if(findByHops(*distances[target], 0, &info))
 	{
+		// printf("Old cost: %ld\n", info->cost);
+		long costDiff = newDist - info->cost;
 		info->cost = newDist;
 		sendNeighborCostChange(target, newDist);	
 		int node[1];
 		node[0] = globalMyID;
 		sendUpdateMsg(target, newDist, 1, node);
+		for(int i = 0; i < 256; i++)
+		{
+			RouteInfo * res = (RouteInfo *)malloc(sizeof(RouteInfo) * 100);
+			if(distances[i] != NULL)
+			{
+				int found = findAllRoutesWithNextHop(distances[i], target, &res);
+				for(int j = 0; j < found; j++)
+				{
+					RouteInfo * info = res + j;
+
+					int_vector route = info->path;
+					addValueToIntVector(&route, globalMyID);
+					// printf("Route to %d. Old Cost: %ld CostDiff: %ld New Cost: %ld\n", info->nodeID, info->cost, costDiff, info->cost + costDiff);
+					info->cost = info->cost + costDiff;
+					sendUpdateMsg(info->nodeID, info->cost, info->path.numValues + 1, route.values);
+				}
+			}
+		}
 	}
 }
 
@@ -459,8 +475,6 @@ void handleUpdateMsg(char * recvBuf)
 	info->cost = cost;
 	int_vector * vec = newIntVector();
 
-	printf("COST: %ld\n", info->cost);
-
 	for(int i = 0; i < numHops; i++)
 	{
 		addValueToIntVector(vec, *(recvBuf+pad));
@@ -485,6 +499,7 @@ void handleUpdateMsg(char * recvBuf)
 
 		if(findByHops(*(distances[sender]), 0, &neighborInfo))
 		{
+			printf("Update for %d %ld + %ld\n", nodeID, info->cost, neighborInfo->cost);
 			info->cost = info->cost + neighborInfo->cost;
 			int found = findMatchingRoute(*distances[nodeID], *info, &oldRoute);
 			if(!found)
@@ -498,7 +513,6 @@ void handleUpdateMsg(char * recvBuf)
 					oldRoute->cost = info->cost;
 				}
 			}
-			printf("Update for %d Cost: %ld\n", nodeID, info->cost);
 			addValueToIntVector(vec, globalMyID);
 			sendUpdateMsg(nodeID, info->cost, numHops + 1, vec->values);
 		}
@@ -589,17 +603,18 @@ void listenForNeighbors()
 		}
 		else if(!strncmp(recvBuf, "CCHG", 4))
 		{
+			// printf("---------------\n");
 			printf("Received neighbor cost change \n");
 			fflush(stdout);
 			handleNeighborCostChangeMsg(recvBuf);
 		}
 		else if(!strncmp(recvBuf, "UPDT", 4))
 		{
+			// printf("---------------\n");
 			printf("Received update \n");
 			fflush(stdout);
 			handleUpdateMsg(recvBuf);
 		}
-
 	}
 	//(should never reach here)
 	close(globalSocketUDP);

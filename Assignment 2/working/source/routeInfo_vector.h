@@ -94,6 +94,21 @@ int findActiveRoutesWithCost(RouteInfo_vector existingRoutes, int cost, RouteInf
 	return r->numValues;
 }
 
+int findAllRoutesWithNextHop(RouteInfo_vector * existingRoutes, int nodeID, RouteInfo ** results)
+{
+	int index = 0;
+	for(int i = 0; i < existingRoutes->numValues; i++)
+	{
+		RouteInfo * cur = (existingRoutes->routes) + i;
+		if(cur->path.numValues > 0 && cur->path.values[cur->path.numValues - 1] == nodeID)
+		{
+			results[index] = cur;
+			index++;
+		}
+	}
+	return index;
+}
+
 void printRoutingInfo(RouteInfo_vector * vec)
 {
 	for(int i = 0; i < vec->numValues; i++)
