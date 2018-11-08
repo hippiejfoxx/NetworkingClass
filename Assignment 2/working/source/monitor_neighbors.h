@@ -181,7 +181,7 @@ void* monitorConnections(void* unusedParam)
 			{
 				struct timeval res; 
 				timersub(&now, &globalLastHeartbeat[i], &res);
-				if(res.tv_sec > 1)
+				if(res.tv_usec > 600000)
 				{
 					connected[i] = 0;
 
@@ -373,8 +373,8 @@ void handleSendMessage(unsigned char * recvBuf, int origin)
 				RouteInfo_vector routes = *distances[target];
 				int nextHop = getNextHop(routes);
 				origin ?
-				sprintf(logLine, "1sending packet dest %d nexthop %d message %s\n", target, nextHop, msgBuff)
-				:sprintf(logLine, "1forward packet dest %d nexthop %d message %s\n", target, nextHop, msgBuff);
+				sprintf(logLine, "sending packet dest %d nexthop %d message %s\n", target, nextHop, msgBuff)
+				:sprintf(logLine, "forward packet dest %d nexthop %d message %s\n", target, nextHop, msgBuff);
 				sendto(globalSocketUDP, recvBuf, 1000, 0, (struct sockaddr*)&globalNodeAddrs[nextHop], sizeof(globalNodeAddrs[nextHop]));
 			}
 		} else
