@@ -53,8 +53,6 @@ int findLowestActiveCost(RouteInfo_vector existingRoutes)
 	for(int i = 0; i < existingRoutes.numValues; i++)
 	{
 		RouteInfo cur = existingRoutes.routes[i];
-		// printf("Cost: %ld\n", cur.cost);
-		fflush(stdout);
 		if(cur.isActive && (distance == -1 || (distance >= 0 && distance > cur.cost)))
 		{
 			distance = cur.cost;
@@ -67,8 +65,6 @@ int findActiveRoutesWithCost(RouteInfo_vector existingRoutes, int cost, RouteInf
 {
 	for(int i = 0; i < existingRoutes.numValues; i++)
 	{
-		printf("Route#: %d to %d\n", i, existingRoutes.routes[i].path.values[existingRoutes.routes[i].path.numValues - 1]);
-		fflush(stdout);
 		RouteInfo cur = existingRoutes.routes[i];
 		if(cur.isActive && cur.cost == cost)
 		{

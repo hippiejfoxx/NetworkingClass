@@ -702,6 +702,7 @@ void listenForNeighbors()
 		if(strlen(logLine) > 0)
 		{
 			fwrite(logLine, 1, strlen(logLine), logFile);
+			fflush(logFile);
 		}
 	}
 	//(should never reach here)
