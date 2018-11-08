@@ -46,20 +46,6 @@ int findByHops(RouteInfo_vector vec, int findHops, RouteInfo ** info)
 	return 0;
 }
 
-int findMatchingRoute(RouteInfo_vector existingRoutes, RouteInfo check, RouteInfo ** info)
-{
-	for(int i = 0; i < existingRoutes.numValues; i++)
-	{
-		RouteInfo cur = existingRoutes.routes[i];
-		if(check.path.numValues == cur.path.numValues && isMatch(cur.path, check.path))
-		{
-			*info = &cur;
-			return 1;
-		}
-	}
-	return 0;
-}
-
 int findLowestActiveCost(RouteInfo_vector existingRoutes)
 {
 	int distance = -1;
@@ -67,7 +53,7 @@ int findLowestActiveCost(RouteInfo_vector existingRoutes)
 	for(int i = 0; i < existingRoutes.numValues; i++)
 	{
 		RouteInfo cur = existingRoutes.routes[i];
-		printf("Cost: %ld\n", cur.cost);
+		// printf("Cost: %ld\n", cur.cost);
 		fflush(stdout);
 		if(cur.isActive && (distance == -1 || (distance >= 0 && distance > cur.cost)))
 		{
@@ -86,7 +72,7 @@ int findActiveRoutesWithCost(RouteInfo_vector existingRoutes, int cost, RouteInf
 		RouteInfo cur = existingRoutes.routes[i];
 		if(cur.isActive && cur.cost == cost)
 		{
-			printf("Match\n");
+			// printf("Match\n");
 			addRouteInfoToVector(*results, cur);
 		}
 	}
@@ -107,6 +93,20 @@ int findAllRoutesWithNextHop(RouteInfo_vector * existingRoutes, int nodeID, Rout
 		}
 	}
 	return index;
+}
+
+int findMatchingRoute(RouteInfo_vector * existingRoutes, RouteInfo check, RouteInfo ** info)
+{
+	for(int i = 0; i < existingRoutes->numValues; i++)
+	{
+		RouteInfo * cur = existingRoutes->routes + i;
+		if(check.path.numValues == cur->path.numValues && isMatch(cur->path, check.path))
+		{
+			*info = cur;
+			return 1;
+		}
+	}
+	return 0;
 }
 
 void printRoutingInfo(RouteInfo_vector * vec)
