@@ -276,6 +276,7 @@ void handleNeighborMsg(int nodeID)
 
 	if(connected[nodeID] == 0)
 	{
+		// printf("%d connected.\n", nodeID);
 		sendInfoMsg(nodeID, info->cost, 1, hop);
 		for(int i = 0; i < 256; i++)
 		{
@@ -372,7 +373,7 @@ void handleSendMessage(unsigned char * recvBuf, int origin)
 			if(distances[target] != NULL && distances[target]->numValues <= 1)
 			{
 				int nextHop = 0;
-				printf("Status of route: %d\n", distances[target]->routes[0].isActive);
+				// printf("Status of route: %d\n", distances[target]->routes[0].isActive);
 				nextHop = distances[target]->routes[0].path.numValues <= 0 ? target : distances[target]->routes[0].path.values[distances[target]->routes[0].path.numValues - 1];
 
 				origin ? 
@@ -493,6 +494,8 @@ void handleInfoMessage(unsigned char * recvBuf)
 	info->isActive = 1;
 	int_vector * vec = newIntVector();
 
+	// printf("Info message regarding %d\n", nodeID);
+
 	for(int i = 0; i < numHops; i++)
 	{
 		addValueToIntVector(vec, *(recvBuf+pad));
@@ -521,15 +524,17 @@ void handleInfoMessage(unsigned char * recvBuf)
 			int found = findMatchingRoute(distances[nodeID], *info, &oldRoute);
 			if(!found)
 			{
+				// printf("Added new route\n");
 				addRouteInfoToVector(distances[nodeID], *info);
 			} 
 			else
 			{
-				if(oldRoute->cost != info->cost)
-				{
-					oldRoute->cost = info->cost;
-					oldRoute->isActive = 1;
-				}
+				// printf("Found existing route (Status: %d): ", oldRoute->isActive);
+				// printValues(info->path);
+				// printf("Reconnected route to %d: ", info->nodeID);
+				// printValues(info->path);
+				oldRoute->cost = info->cost;
+				oldRoute->isActive = 1;
 			}
 			addValueToIntVector(vec, globalMyID);
 			sendInfoMsg(nodeID, info->cost, numHops + 1, vec->values);
