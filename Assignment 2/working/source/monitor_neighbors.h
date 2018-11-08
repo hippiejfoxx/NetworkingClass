@@ -99,29 +99,21 @@ void sendInfoMsg(int target, long newDist, int numHops, int * hops)
 	hackyBroadcast(msg, size);
 }
 
-void sendWithdrawMsg(int target, long newDist, int numHops, int * hops)
+void sendWithdrawMsg(int target, int sender)
 {
 	int pad = 0;
-	int size = (4 * sizeof(char)) + (2 * sizeof(int)) + sizeof(long) + (numHops * sizeof(int));
+	int size = (4 * sizeof(char)) + (2 * sizeof(int));
 	char * msg = (char *)malloc(size);
+
+	// printf("Sending withdraw for %d from %d\n", target, sender);
 
 	memcpy(msg, "WITH", (4 * sizeof(char)));
 	pad = pad + (4 * sizeof(char));
 	
-	memcpy(msg+pad, &target, sizeof(int));
+	memcpy(msg + pad, &target, sizeof(int));
 	pad = pad + sizeof(int);
 
-	memcpy(msg+pad, &newDist, sizeof(long));
-	pad = pad + sizeof(long);
-
-	memcpy(msg+pad, &numHops, sizeof(int));
-	pad = pad + sizeof(int);
-
-	for(int i = 0; i < numHops; ++i)
-	{
-		memcpy(msg+pad, &hops[i], sizeof(int));
-		pad = pad + sizeof(int);
-	}
+	memcpy(msg + pad, &sender, sizeof(int));
 
 	hackyBroadcast(msg, size);
 }
@@ -168,13 +160,12 @@ void* announceToNeighbors(void* unusedParam)
 void* monitorConnections(void* unusedParam)
 {
 	struct timespec sleepFor;
+	sleepFor.tv_sec = 0;
+	sleepFor.tv_nsec = 300 * 1000 * 1000 * 2; //600 ms
 	while(1)
 	{
-		fflush(stdout);
 		struct timeval now;
 		gettimeofday(&now, 0);
-		sleepFor.tv_sec = 0;
-		sleepFor.tv_nsec = 300 * 1000 * 1000 * 2; //600 ms
 		for(int i = 0; i < 256; i++)
 		{
 			if(connected[i])
@@ -192,8 +183,27 @@ void* monitorConnections(void* unusedParam)
 
 					if(vec != NULL && findByHops(*vec, 0, &info))
 					{
-						sendWithdrawMsg(info->nodeID, info->cost, 1, nodes);
+						// printf("Turn off connection to %d\n", i);
+						info->isActive = 0;
+						sendWithdrawMsg(info->nodeID, globalMyID);
 					}
+
+					int totalFound = 0;
+					for(int j = 0; j < 255; j++)
+					{
+						if(distances[j] != NULL)
+						{
+							RouteInfo * results[10000];
+							int found = findAllRoutesWithNextHop(distances[j], i, results);
+							totalFound = totalFound + found;
+							for(int k = 0; k < found; k++)
+							{
+								RouteInfo * info = results[k];
+								info->isActive = 0;
+							}
+						}
+					}
+					// printf("Total routes disabled: %d\n", totalFound);
 				}
 			}
 		}
@@ -274,10 +284,12 @@ void handleNeighborMsg(int nodeID)
 			{
 				for(int j = 0; j < routes->numValues; j++)
 				{
-					RouteInfo info = routes->routes[j];
-					int_vector nodes = info.path;
+					RouteInfo * info = routes->routes + j;
+					info->isActive = 1;
+
+					int_vector nodes = info->path;
 					addValueToIntVector(&nodes, globalMyID);
-					sendInfoMsg(info.nodeID, info.cost, nodes.numValues, nodes.values);
+					sendInfoMsg(info->nodeID, info->cost, nodes.numValues, nodes.values);
 				}
 			}
 		}
@@ -360,9 +372,8 @@ void handleSendMessage(unsigned char * recvBuf, int origin)
 			if(distances[target] != NULL && distances[target]->numValues <= 1)
 			{
 				int nextHop = 0;
-
+				printf("Status of route: %d\n", distances[target]->routes[0].isActive);
 				nextHop = distances[target]->routes[0].path.numValues <= 0 ? target : distances[target]->routes[0].path.values[distances[target]->routes[0].path.numValues - 1];
-
 
 				origin ? 
 				sprintf(logLine, "sending packet dest %d nexthop %d message %s\n", target, nextHop, msgBuff)
@@ -405,13 +416,13 @@ void handleCostMessage(unsigned char * recvBuf)
 		sendUpdateMsg(target, newDist, 1, node);
 		for(int i = 0; i < 256; i++)
 		{
-			RouteInfo * res = (RouteInfo *)malloc(sizeof(RouteInfo) * 100);
+			RouteInfo * res[10000];
 			if(distances[i] != NULL)
 			{
-				int found = findAllRoutesWithNextHop(distances[i], target, &res);
+				int found = findAllRoutesWithNextHop(distances[i], target, res);
 				for(int j = 0; j < found; j++)
 				{
-					RouteInfo * info = res + j;
+					RouteInfo * info = res[j];
 
 					int_vector route = info->path;
 					addValueToIntVector(&route, globalMyID);
@@ -426,42 +437,37 @@ void handleCostMessage(unsigned char * recvBuf)
 void handleWithdrawMessage(char * recvBuf)
 {
 	int pad = sizeof(char) * 4; 
-	int nodeID;
-	long cost;
-	int numHops;
+	int target;
+	int sender;
 
-	memcpy(&nodeID, recvBuf + pad, sizeof(int));
+	memcpy(&target, recvBuf + pad, sizeof(int));
 	pad = pad + sizeof(int);
 
-	memcpy(&cost, recvBuf + 4 + sizeof(int) , sizeof(long));
-	pad = pad + (sizeof(long));
-
-	memcpy(&numHops, recvBuf + 4 + sizeof(int) + sizeof(long), sizeof(int));
+	memcpy(&sender, recvBuf + pad, sizeof(int));
 	pad = pad + sizeof(int);
 
-	RouteInfo * info = (RouteInfo *)malloc(sizeof(RouteInfo));
-	info->nodeID = nodeID;
-	info->cost = cost;
-	int_vector * vec = newIntVector();
+	// printf("Target: %d Sender: %d \n", target, sender);
 
-	for(int i = 0; i < numHops; i++)
+	int totalFound = 0;
+	for(int i = 0; i < 255; i++)
 	{
-		addValueToIntVector(vec, *(recvBuf+pad));
-		pad = pad + sizeof(int);
-	}
-
-	info->path = *vec;
-
-	if(nodeID != globalMyID && !contains(*vec, globalMyID))
-	{
-		RouteInfo * found;
-		if(findMatchingRoute(distances[nodeID], *info, &found))
+		if(distances[i] != NULL)
 		{
-			found->isActive = 0;
+			RouteInfo * results[10000];
+			int found = findActiveRoutesWithLink(distances[i], target, sender, results);
+			totalFound = totalFound + found;
+			for(int j = 0; j < found; j++)
+			{
+				RouteInfo * info = results[j];
+				info->isActive = 0;
+			}
 		}
-		addValueToIntVector(vec, globalMyID);
-		sendWithdrawMsg(nodeID, cost, numHops + 1, vec->values);
-		fflush(stdout);
+	}
+	
+	if(totalFound > 0)
+	{
+		// printf("Found active routes\n");
+		sendWithdrawMsg(target, sender);
 	}
 }
 
@@ -617,13 +623,13 @@ void handleNeighborCostChangeMsg(char * recvBuf)
 		sendUpdateMsg(nodeID, cost, 1, node);
 		for(int i = 0; i < 256; i++)
 		{
-			RouteInfo * res = (RouteInfo *)malloc(sizeof(RouteInfo) * 100);
+			RouteInfo * res[10000];
 			if(distances[i] != NULL)
 			{
-				int found = findAllRoutesWithNextHop(distances[i], nodeID, &res);
+				int found = findAllRoutesWithNextHop(distances[i], nodeID, res);
 				for(int j = 0; j < found; j++)
 				{
-					RouteInfo * info = res + j;
+					RouteInfo * info = res[j];
 
 					int_vector route = info->path;
 					addValueToIntVector(&route, globalMyID);
@@ -701,8 +707,10 @@ void listenForNeighbors()
 
 		if(strlen(logLine) > 0)
 		{
+			printf("%s", logLine);
 			fwrite(logLine, 1, strlen(logLine), logFile);
 			fflush(logFile);
+			fflush(stdout);
 		}
 	}
 	//(should never reach here)

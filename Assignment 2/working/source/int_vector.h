@@ -64,3 +64,12 @@ int contains(int_vector vec, int value)
 	}
 	return 0;
 }
+
+void printValues(int_vector vec)
+{
+	for(int i = 0; i < vec.numValues; i++)
+	{
+		printf(" %d ", vec.values[i]);
+	}
+	printf("\n");
+}
