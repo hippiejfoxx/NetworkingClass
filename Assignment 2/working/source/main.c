@@ -62,7 +62,6 @@ int main(int argc, char** argv)
 		exit(1);
 	}
 	
-	
 	//start threads... feel free to add your own, and to remove the provided ones.
 	pthread_t announcerThread;
 	pthread_create(&announcerThread, 0, announceToNeighbors, (void*)0);
@@ -70,15 +69,7 @@ int main(int argc, char** argv)
 	pthread_t monitorThread;
 	pthread_create(&monitorThread, 0, monitorConnections, (void*)0);
 
-
-	
-	
-	
-	
-	openCostFile(argv[3]);
-	//good luck, have fun!
+	openLogFile(argv[3]);
+	openCostFile(argv[2]);
 	listenForNeighbors();
-	
-	
-	
 }

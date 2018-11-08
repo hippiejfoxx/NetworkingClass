@@ -26,6 +26,10 @@ extern int globalSocketUDP;
 //pre-filled for sending to 10.1.1.0 - 255, port 7777
 extern struct sockaddr_in globalNodeAddrs[256];
 
+FILE * logFile;
+
+char logLine[10000];
+
 RouteInfo_vector * distances[256];
 
 
@@ -179,7 +183,6 @@ void* monitorConnections(void* unusedParam)
 				timersub(&now, &globalLastHeartbeat[i], &res);
 				if(res.tv_sec > 1)
 				{
-					printf("Disconnected: %d \n", i);
 					connected[i] = 0;
 
 					RouteInfo_vector * vec = distances[i];
@@ -227,6 +230,16 @@ void openCostFile(char * fileName)
 			RouteInfo_vector * vec = distances[target];
 			addRouteInfoToVector(vec, newInfo);
 		}
+	}
+}
+
+void openLogFile(char * fileName)
+{
+	logFile = fopen(fileName, "w");
+	if(logFile == NULL) 
+	{
+		perror("Cannot create log file");
+		exit(1);
 	}
 }
 
@@ -293,13 +306,11 @@ void * sendNeighborCostChange(int target, long cost)
 int getNextHop(RouteInfo_vector routes)
 {
 	long lowestCost = findLowestActiveCost(routes);
-	printf("Lowest Cost Route: %ld\n", lowestCost);
 
 	RouteInfo_vector * matches = newRouteInfoVector();
 	int numMatches = findActiveRoutesWithCost(routes, lowestCost, &matches);
 	if(numMatches > 0)
 	{
-		printf("Num matches %d\n", numMatches);
 		if(numMatches == 1)
 		{
 			int_vector pathData = matches->routes[0].path;
@@ -331,7 +342,7 @@ int getNextHop(RouteInfo_vector routes)
 	}
 }
 
-void handleSendMessage(unsigned char * recvBuf)
+void handleSendMessage(unsigned char * recvBuf, int origin)
 {
 	char msgBuff[100];
 	int target = 0;
@@ -341,21 +352,34 @@ void handleSendMessage(unsigned char * recvBuf)
 
 	if(target == globalMyID)
 	{
-		printf("%s\n", msgBuff);
+		sprintf(logLine, "receive packet message %s\n", msgBuff);
 	} else
 	{
-		printf("Target: %d\n", target);
-		if(distances[target] != NULL && distances[target]->numValues <= 1)
+		if(anyActiveRoutes(*distances[target]))
 		{
-			printf("Target: %d\n", target);
-			sendto(globalSocketUDP, recvBuf, 1000, 0, (struct sockaddr*)&globalNodeAddrs[target], sizeof(globalNodeAddrs[target]));
+			if(distances[target] != NULL && distances[target]->numValues <= 1)
+			{
+				int nextHop = 0;
+
+				nextHop = distances[target]->routes[0].path.numValues <= 0 ? target : distances[target]->routes[0].path.values[distances[target]->routes[0].path.numValues - 1];
+
+
+				origin ? 
+				sprintf(logLine, "sending packet dest %d nexthop %d message %s\n", target, nextHop, msgBuff)
+				: sprintf(logLine, "forward packet dest %d nexthop %d message %s\n", target, nextHop, msgBuff);
+				sendto(globalSocketUDP, recvBuf, 1000, 0, (struct sockaddr*)&globalNodeAddrs[nextHop], sizeof(globalNodeAddrs[nextHop]));
+			} else
+			{
+				RouteInfo_vector routes = *distances[target];
+				int nextHop = getNextHop(routes);
+				origin ?
+				sprintf(logLine, "1sending packet dest %d nexthop %d message %s\n", target, nextHop, msgBuff)
+				:sprintf(logLine, "1forward packet dest %d nexthop %d message %s\n", target, nextHop, msgBuff);
+				sendto(globalSocketUDP, recvBuf, 1000, 0, (struct sockaddr*)&globalNodeAddrs[nextHop], sizeof(globalNodeAddrs[nextHop]));
+			}
 		} else
 		{
-			RouteInfo_vector routes = *distances[target];
-			int nextHop = getNextHop(routes);
-			printf("Next hop %d\n", nextHop);
-
-			sendto(globalSocketUDP, recvBuf, 1000, 0, (struct sockaddr*)&globalNodeAddrs[nextHop], sizeof(globalNodeAddrs[nextHop]));
+			sprintf(logLine, "unreachable dest %d\n", target);
 		}
 	}
 }
@@ -373,7 +397,6 @@ void handleCostMessage(unsigned char * recvBuf)
 	RouteInfo * info;
 	if(findByHops(*distances[target], 0, &info))
 	{
-		// printf("Old cost: %ld\n", info->cost);
 		long costDiff = newDist - info->cost;
 		info->cost = newDist;
 		sendNeighborCostChange(target, newDist);	
@@ -392,7 +415,6 @@ void handleCostMessage(unsigned char * recvBuf)
 
 					int_vector route = info->path;
 					addValueToIntVector(&route, globalMyID);
-					// printf("Route to %d. Old Cost: %ld CostDiff: %ld New Cost: %ld\n", info->nodeID, info->cost, costDiff, info->cost + costDiff);
 					info->cost = info->cost + costDiff;
 					sendUpdateMsg(info->nodeID, info->cost, info->path.numValues + 1, route.values);
 				}
@@ -435,7 +457,6 @@ void handleWithdrawMessage(char * recvBuf)
 		RouteInfo * found;
 		if(findMatchingRoute(distances[nodeID], *info, &found))
 		{
-			printf("withdraw processed\n");
 			found->isActive = 0;
 		}
 		addValueToIntVector(vec, globalMyID);
@@ -521,7 +542,6 @@ void handleUpdateMsg(char * recvBuf)
 	memcpy(&nodeID, recvBuf + pad, sizeof(int));
 	pad = pad + sizeof(int);
 
-	// printf("Update for %d", nodeID);
 
 	memcpy(&cost, recvBuf + 4 + sizeof(int) , sizeof(long));
 	pad = pad + (sizeof(long));
@@ -558,7 +578,6 @@ void handleUpdateMsg(char * recvBuf)
 
 		if(findByHops(*(distances[sender]), 0, &neighborInfo))
 		{
-			printf("Update for %d %ld + %ld\n", nodeID, info->cost, neighborInfo->cost);
 			info->cost = info->cost + neighborInfo->cost;
 			int found = findMatchingRoute(distances[nodeID], *info, &oldRoute);
 			if(!found)
@@ -571,7 +590,6 @@ void handleUpdateMsg(char * recvBuf)
 				{
 					oldRoute->cost = info->cost;
 					findMatchingRoute(distances[nodeID], *info, &oldRoute);
-					printf("Update existing %ld\n", oldRoute->cost);
 				}
 			}
 			addValueToIntVector(vec, globalMyID);
@@ -592,7 +610,6 @@ void handleNeighborCostChangeMsg(char * recvBuf)
 	RouteInfo * info;
 	if(findByHops(*distances[nodeID], 0, &info))
 	{
-		// printf("Update for %d Old Cost: %ld, Cost: %ld\n", nodeID, info->cost ,cost);m
 		long costDiff = cost - info->cost;
 		info->cost = cost;
 		int node[1];
@@ -610,7 +627,6 @@ void handleNeighborCostChangeMsg(char * recvBuf)
 
 					int_vector route = info->path;
 					addValueToIntVector(&route, globalMyID);
-					printf("Route to %d. Old Cost: %ld CostDiff: %ld New Cost: %ld\n", info->nodeID, info->cost, costDiff, info->cost + costDiff);
 					info->cost = info->cost + costDiff;
 					sendUpdateMsg(info->nodeID, info->cost, info->path.numValues + 1, route.values);
 				}
@@ -630,6 +646,7 @@ void listenForNeighbors()
 	while(1)
 	{
 		memset(recvBuf, 0, 1000);
+		memset(logLine, 0, 1000);
 		theirAddrLen = sizeof(theirAddr);
 		if ((bytesRecvd = recvfrom(globalSocketUDP, recvBuf, 1000 , 0, 
 					(struct sockaddr*)&theirAddr, &theirAddrLen)) == -1)
@@ -658,42 +675,33 @@ void listenForNeighbors()
 		//send format: 'send'<4 ASCII bytes>, destID<net order 2 byte signed>, <some ASCII message>
 		if(!strncmp(recvBuf, "send", 4))
 		{
-			// heardFrom = atoi(
-			// 		strchr(strchr(strchr(fromAddr,'.')+1,'.')+1,'.')+1);
-			handleSendMessage(recvBuf);
+			handleSendMessage(recvBuf, heardFrom < 0 ? 1 : 0);
 		}
 		//'cost'<4 ASCII bytes>, destID<net order 2 byte signed> newCost<net order 4 byte signed>
 		else if(!strncmp(recvBuf, "cost", 4))
 		{
-		// 	heardFrom = atoi(
-		// 			strchr(strchr(strchr(fromAddr,'.')+1,'.')+1,'.')+1);
-			printf("Cost msg received\n");
 			handleCostMessage(recvBuf);
 		}
 		else if(!strncmp(recvBuf, "INFO", 4))
 		{
-			// heardFrom = atoi(
-			// 		strchr(strchr(strchr(fromAddr,'.')+1,'.')+1,'.')+1);
 			handleInfoMessage(recvBuf);
 		}
 		else if(!strncmp(recvBuf, "WITH", 4))
 		{
-			printf("Received withdraw \n");
 			handleWithdrawMessage(recvBuf);
 		}
 		else if(!strncmp(recvBuf, "CCHG", 4))
 		{
-			// printf("---------------\n");
-			printf("Received neighbor cost change \n");
-			fflush(stdout);
 			handleNeighborCostChangeMsg(recvBuf);
 		}
 		else if(!strncmp(recvBuf, "UPDT", 4))
 		{
-			// printf("---------------\n");
-			printf("Received update \n");
-			fflush(stdout);
 			handleUpdateMsg(recvBuf);
+		}
+
+		if(strlen(logLine) > 0)
+		{
+			fwrite(logLine, 1, strlen(logLine), logFile);
 		}
 	}
 	//(should never reach here)

@@ -109,17 +109,26 @@ int findMatchingRoute(RouteInfo_vector * existingRoutes, RouteInfo check, RouteI
 	return 0;
 }
 
-void printRoutingInfo(RouteInfo_vector * vec)
+int anyActiveRoutes(RouteInfo_vector routes)
 {
-	for(int i = 0; i < vec->numValues; i++)
+	for(int i = 0; i < routes.numValues; i++)
 	{
-		RouteInfo info = vec->routes[i];
-		printf("Node %d Cost: %ld \n", info.nodeID, info.cost);
-		printf("Route: ");
-		for(int j = 0; j < info.path.numValues; j++)
+		if(routes.routes[i].isActive)
 		{
-			printf("%d ", info.path.values[j]);
+			return 1;
 		}
-		printf("\n");
 	}
+	return 0;	
 }
+
+// void printRoutingInfo(RouteInfo_vector * vec)
+// {
+// 	for(int i = 0; i < vec->numValues; i++)
+// 	{
+// 		RouteInfo info = vec->routes[i];
+// 		for(int j = 0; j < info.path.numValues; j++)
+// 		{
+// 			printf("%d ", info.path.values[j]);
+// 		}
+// 	}
+// }
